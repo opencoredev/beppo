@@ -19,6 +19,10 @@
     "./Net": {
       "types": "./src/Net.ts",
       "import": "./src/Net.ts"
+    },
+    "./wsl": {
+      "types": "./src/wsl.ts",
+      "import": "./src/wsl.ts"
     }
   },
   "scripts": {

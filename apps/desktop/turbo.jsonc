@@ -4,7 +4,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist-electron/**"],
+      "outputs": ["build/**", "artifacts/**"],
     },
     "dev": {
       "dependsOn": ["t3#build"],

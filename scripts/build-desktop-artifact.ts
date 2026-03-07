@@ -174,7 +174,7 @@ interface StagePackageJson {
   readonly build: Record<string, unknown>;
   readonly dependencies: Record<string, unknown>;
   readonly devDependencies: {
-    readonly electron: string;
+    readonly electrobun: string;
   };
 }
 
@@ -409,7 +409,7 @@ function resolveDesktopRuntimeDependencies(
   }
 
   const runtimeDependencies = Object.fromEntries(
-    Object.entries(dependencies).filter(([dependencyName]) => dependencyName !== "electron"),
+    Object.entries(dependencies).filter(([dependencyName]) => dependencyName !== "electrobun"),
   );
 
   return resolveCatalogDependencies(runtimeDependencies, catalog, "apps/desktop");
@@ -523,7 +523,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     });
   }
 
-  const electronVersion = desktopPackageJson.dependencies.electron;
+  const electrobunVersion = desktopPackageJson.dependencies.electrobun;
 
   const serverDependencies = serverPackageJson.dependencies;
   if (!serverDependencies || Object.keys(serverDependencies).length === 0) {
@@ -618,7 +618,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     private: true,
     description: "T3 Code desktop build",
     author: "T3 Tools",
-    main: "apps/desktop/dist-electron/main.js",
+    main: "apps/desktop/build",
     build: yield* createBuildConfig(
       options.platform,
       options.target,
@@ -630,7 +630,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       ...resolvedDesktopRuntimeDependencies,
     },
     devDependencies: {
-      electron: electronVersion,
+      electrobun: electrobunVersion,
     },
   };
 
