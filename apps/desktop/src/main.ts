@@ -52,7 +52,7 @@ const STATE_DIR =
   process.env.T3CODE_STATE_DIR?.trim() || Path.join(OS.homedir(), ".t3", "userdata");
 const ROOT_DIR = Path.resolve(import.meta.dir, "..");
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
-const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : desktopPackageJson.productName ?? "T3 Code";
+const APP_DISPLAY_NAME = isDevelopment ? "Beppo (Dev)" : desktopPackageJson.productName ?? "Beppo";
 const LOG_DIR = Path.join(STATE_DIR, "logs");
 const LOG_FILE_MAX_BYTES = 10 * 1024 * 1024;
 const LOG_FILE_MAX_FILES = 10;

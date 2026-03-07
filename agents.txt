@@ -1,4 +1,4 @@
-T3 Code agent instructions
+Beppo agent instructions
 
 Canonical repository instructions live in `AGENTS.md`.
 

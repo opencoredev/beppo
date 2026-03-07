@@ -2,10 +2,10 @@ import type { ElectrobunConfig } from "./src/electrobun-runtime";
 
 const config = {
   app: {
-    name: "T3 Code",
+    name: "Beppo",
     identifier: "com.t3tools.t3code",
     version: "0.0.2",
-    description: "T3 Code desktop app",
+    description: "Beppo desktop app",
     urlSchemes: ["t3"],
   },
   build: {
