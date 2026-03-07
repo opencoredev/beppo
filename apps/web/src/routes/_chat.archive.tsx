@@ -395,8 +395,8 @@ function ArchiveRouteView() {
         });
       }
 
-      setDeleteDialogThreadIds(null);
     } finally {
+      setDeleteDialogThreadIds(null);
       setPendingAction(null);
     }
   }, [
