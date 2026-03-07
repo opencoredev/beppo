@@ -19,7 +19,7 @@
     "start": "node dist/index.mjs",
     "prepare": "effect-language-service patch",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "bunx --bun vitest run"
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",

@@ -21,7 +21,7 @@
     "build": "bunx --bun tsdown src/index.ts --format esm,cjs --dts --clean",
     "prepare": "effect-language-service patch",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "bunx --bun vitest run"
   },
   "dependencies": {
     "effect": "catalog:"
