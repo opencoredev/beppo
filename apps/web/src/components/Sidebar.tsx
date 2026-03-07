@@ -1178,17 +1178,12 @@ export default function Sidebar() {
   const renderThreadItem = useCallback(
     (thread: Thread) => {
       const isActive = routeThreadId === thread.id;
-      const isArchived = thread.archivedAt !== null;
-      const threadStatus = isArchived
-        ? null
-        : threadStatusPill(thread, pendingApprovalByThreadId.get(thread.id) === true);
-      const prStatus = isArchived ? null : prStatusIndicator(prByThreadId.get(thread.id) ?? null);
-      const terminalStatus = isArchived
-        ? null
-        : terminalStatusFromRunningIds(
-            selectThreadTerminalState(terminalStateByThreadId, thread.id).runningTerminalIds,
-          );
-      const timestamp = isArchived ? thread.archivedAt ?? thread.createdAt : thread.createdAt;
+      const threadStatus = threadStatusPill(thread, pendingApprovalByThreadId.get(thread.id) === true);
+      const prStatus = prStatusIndicator(prByThreadId.get(thread.id) ?? null);
+      const terminalStatus = terminalStatusFromRunningIds(
+        selectThreadTerminalState(terminalStateByThreadId, thread.id).runningTerminalIds,
+      );
+      const timestamp = thread.createdAt;
 
       return (
         <SidebarMenuSubItem key={thread.id} className="group/thread-item w-full">
@@ -1199,9 +1194,7 @@ export default function Sidebar() {
             className={`relative h-7 w-full translate-x-0 cursor-pointer justify-start px-2 text-left hover:bg-accent hover:text-foreground ${
               isActive
                 ? "bg-accent/85 text-foreground font-medium ring-1 ring-border/70 dark:bg-accent/55 dark:ring-border/50"
-                : isArchived
-                  ? "text-muted-foreground/80"
-                  : "text-muted-foreground"
+                : "text-muted-foreground"
             }`}
             onClick={() => {
               void navigate({
@@ -1260,12 +1253,6 @@ export default function Sidebar() {
                   <span className="hidden md:inline">{threadStatus.label}</span>
                 </span>
               )}
-              {isArchived && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.18em] text-muted-foreground/80">
-                  <ArchiveIcon className="size-2.5" />
-                  Archived
-                </span>
-              )}
               {renamingThreadId === thread.id ? (
                 <input
                   ref={(el) => {
@@ -1301,8 +1288,20 @@ export default function Sidebar() {
                 <span className="min-w-0 flex-1 truncate text-xs">{thread.title}</span>
               )}
             </div>
-            {isArchived ? (
-              <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            <div className="relative ml-auto flex h-5 w-[4.75rem] shrink-0 items-center justify-end">
+              <div className="absolute inset-0 flex items-center justify-end gap-1.5 transition-[opacity,transform] duration-200 ease-out group-focus-within/thread-item:translate-x-1 group-focus-within/thread-item:opacity-0 group-hover/thread-item:translate-x-1 group-hover/thread-item:opacity-0">
+                {terminalStatus && (
+                  <span
+                    role="img"
+                    aria-label={terminalStatus.label}
+                    title={terminalStatus.label}
+                    className={`inline-flex items-center justify-center ${terminalStatus.colorClass}`}
+                  >
+                    <TerminalIcon
+                      className={`size-3 ${terminalStatus.pulse ? "animate-pulse" : ""}`}
+                    />
+                  </span>
+                )}
                 <span
                   className={`text-[10px] ${
                     isActive ? "text-foreground/65" : "text-muted-foreground/40"
@@ -1311,63 +1310,39 @@ export default function Sidebar() {
                   {formatRelativeTime(timestamp)}
                 </span>
               </div>
-            ) : (
-              <div className="relative ml-auto flex h-5 w-[4.75rem] shrink-0 items-center justify-end">
-                <div className="absolute inset-0 flex items-center justify-end gap-1.5 transition-[opacity,transform] duration-200 ease-out group-focus-within/thread-item:translate-x-1 group-focus-within/thread-item:opacity-0 group-hover/thread-item:translate-x-1 group-hover/thread-item:opacity-0">
-                  {terminalStatus && (
-                    <span
-                      role="img"
-                      aria-label={terminalStatus.label}
-                      title={terminalStatus.label}
-                      className={`inline-flex items-center justify-center ${terminalStatus.colorClass}`}
-                    >
-                      <TerminalIcon
-                        className={`size-3 ${terminalStatus.pulse ? "animate-pulse" : ""}`}
-                      />
-                    </span>
-                  )}
-                  <span
-                    className={`text-[10px] ${
-                      isActive ? "text-foreground/65" : "text-muted-foreground/40"
-                    }`}
-                  >
-                    {formatRelativeTime(timestamp)}
-                  </span>
-                </div>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <button
-                        type="button"
-                        aria-label={`Archive ${thread.title}`}
-                        title="Archive thread"
-                        className="absolute top-1/2 right-0 inline-flex h-5 -translate-y-1/2 translate-x-1 cursor-pointer items-center gap-1 rounded-md border border-border/70 bg-background/95 px-1.5 text-[10px] font-medium text-muted-foreground opacity-0 shadow-xs outline-hidden transition-[opacity,transform,color,background-color,border-color] duration-200 ease-out hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive-foreground focus-visible:translate-x-0 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-focus-within/thread-item:pointer-events-auto group-focus-within/thread-item:translate-x-0 group-focus-within/thread-item:opacity-100 group-hover/thread-item:pointer-events-auto group-hover/thread-item:translate-x-0 group-hover/thread-item:opacity-100 pointer-events-none"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          void handleArchiveAction(thread).catch((error) => {
-                            toastManager.add({
-                              type: "error",
-                              title: "Failed to archive thread",
-                              description: error instanceof Error ? error.message : "An error occurred.",
-                            });
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label={`Archive ${thread.title}`}
+                      title="Archive thread"
+                      className="absolute top-1/2 right-0 inline-flex h-5 -translate-y-1/2 translate-x-1 cursor-pointer items-center gap-1 rounded-md border border-border/70 bg-background/95 px-1.5 text-[10px] font-medium text-muted-foreground opacity-0 shadow-xs outline-hidden transition-[opacity,transform,color,background-color,border-color] duration-200 ease-out hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive-foreground focus-visible:translate-x-0 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-focus-within/thread-item:pointer-events-auto group-focus-within/thread-item:translate-x-0 group-focus-within/thread-item:opacity-100 group-hover/thread-item:pointer-events-auto group-hover/thread-item:translate-x-0 group-hover/thread-item:opacity-100 pointer-events-none"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        void handleArchiveAction(thread).catch((error) => {
+                          toastManager.add({
+                            type: "error",
+                            title: "Failed to archive thread",
+                            description: error instanceof Error ? error.message : "An error occurred.",
                           });
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.stopPropagation();
-                          }
-                        }}
-                      />
-                    }
-                  >
-                    <ArchiveIcon className="size-3" />
-                    <span>Archive</span>
-                  </TooltipTrigger>
-                  <TooltipPopup side="top">Archive thread</TooltipPopup>
-                </Tooltip>
-              </div>
-            )}
+                        });
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.stopPropagation();
+                        }
+                      }}
+                    />
+                  }
+                >
+                  <ArchiveIcon className="size-3" />
+                  <span>Archive</span>
+                </TooltipTrigger>
+                <TooltipPopup side="top">Archive thread</TooltipPopup>
+              </Tooltip>
+            </div>
           </SidebarMenuSubButton>
         </SidebarMenuSubItem>
       );

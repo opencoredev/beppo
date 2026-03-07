@@ -446,13 +446,13 @@ function ArchiveRouteView() {
                   <div className="rounded-lg border border-border bg-background px-3 py-3">
                     <div className="text-xs font-medium text-muted-foreground">Archived now</div>
                     <div className="mt-1 text-xl font-semibold text-foreground">
-                      {archivedThreads.length}
+                      {threadsHydrated ? archivedThreads.length : "—"}
                     </div>
                   </div>
                   <div className="rounded-lg border border-border bg-background px-3 py-3">
                     <div className="text-xs font-medium text-muted-foreground">Projects</div>
                     <div className="mt-1 text-xl font-semibold text-foreground">
-                      {archivedGroups.length}
+                      {threadsHydrated ? archivedGroups.length : "—"}
                     </div>
                   </div>
                 </div>
