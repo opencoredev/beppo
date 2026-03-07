@@ -618,7 +618,7 @@ function ArchiveRouteView() {
                                 </Button>
                                 <Button
                                   size="sm"
-                                  variant={isSelected ? "destructive" : "destructive-outline"}
+                                  variant="destructive-outline"
                                   onClick={(event) => handleDeleteButtonClick(event, thread.id)}
                                   disabled={isMutating}
                                 >

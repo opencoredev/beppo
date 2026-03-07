@@ -108,8 +108,8 @@ export function preferredProjectIdForNewThread(input: {
 }): ProjectId | null {
   const { projects, threads } = input;
   const activeThreads = threads.filter((thread) => thread.archivedAt === null);
-  const mostRecentlyActiveThread = threads
-    .filter((thread) => thread.archivedAt === null && thread.latestTurn?.requestedAt)
+  const mostRecentlyActiveThread = activeThreads
+    .filter((thread) => thread.latestTurn?.requestedAt)
     .toSorted((a, b) => {
       const byRequestedAt =
         Date.parse(b.latestTurn?.requestedAt ?? "") - Date.parse(a.latestTurn?.requestedAt ?? "");
