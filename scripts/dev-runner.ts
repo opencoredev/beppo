@@ -15,7 +15,16 @@ const BASE_SERVER_PORT = 3773;
 const BASE_WEB_PORT = 5733;
 const MAX_HASH_OFFSET = 3000;
 const MAX_PORT = 65535;
-const LINUX_WEBKIT_LIBRARY = "libwebkit2gtk-4.1.so.0";
+const LINUX_DESKTOP_DEPENDENCIES = [
+  {
+    aptPackage: "libwebkit2gtk-4.1-0",
+    library: "libwebkit2gtk-4.1.so.0",
+  },
+  {
+    aptPackage: "libayatana-appindicator3-1",
+    library: "libayatana-appindicator3.so.1",
+  },
+] as const;
 const execFileAsync = promisify(execFile);
 
 export const DEFAULT_DEV_STATE_DIR = Effect.map(Effect.service(Path.Path), (path) =>
@@ -55,15 +64,18 @@ function ensureLinuxDesktopDependencies(mode: DevMode): Effect.Effect<void, DevR
   return Effect.tryPromise({
     try: async () => {
       const { stdout } = await execFileAsync("ldconfig", ["-p"]);
-      if (stdout.includes(LINUX_WEBKIT_LIBRARY)) {
+      const missing = LINUX_DESKTOP_DEPENDENCIES.filter(
+        ({ library }) => !stdout.includes(library),
+      );
+      if (missing.length === 0) {
         return;
       }
 
       throw new Error(
         [
-          "Desktop dev on Linux requires WebKitGTK 4.1 before Electrobun can boot.",
-          `Missing shared library: ${LINUX_WEBKIT_LIBRARY}.`,
-          "Install it with: sudo apt install libwebkit2gtk-4.1-0",
+          "Desktop dev on Linux requires native Electrobun runtime libraries before it can boot.",
+          `Missing shared libraries: ${missing.map(({ library }) => library).join(", ")}.`,
+          `Install them with: sudo apt install ${missing.map(({ aptPackage }) => aptPackage).join(" ")}`,
         ].join(" "),
       );
     },
@@ -72,7 +84,7 @@ function ensureLinuxDesktopDependencies(mode: DevMode): Effect.Effect<void, DevR
         message:
           cause instanceof Error
             ? cause.message
-            : `Desktop dev preflight failed while checking ${LINUX_WEBKIT_LIBRARY}.`,
+            : "Desktop dev preflight failed while checking Linux shared library dependencies.",
         cause,
       }),
   });
