@@ -53,7 +53,7 @@ interface ArchivedThreadGroup {
 type ArchivedThreadId = Thread["id"];
 
 function archivedTimestamp(thread: Thread): number {
-  return Date.parse(thread.archivedAt ?? thread.createdAt);
+  return Date.parse(thread.archivedAt!);
 }
 
 function groupArchivedThreads(threads: Thread[], projects: Project[]): ArchivedThreadGroup[] {

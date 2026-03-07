@@ -19,7 +19,7 @@ import {
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
+import { useMatch, useNavigate, useParams } from "@tanstack/react-router";
 import { useAppSettings } from "../appSettings";
 import { isElectron } from "../env";
 import {
@@ -295,9 +295,16 @@ export default function Sidebar() {
     strict: false,
     select: (params) => (params.threadId ? ThreadId.makeUnsafe(params.threadId) : null),
   });
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const isArchiveRoute = pathname === "/archive";
-  const isSettingsRoute = pathname === "/settings";
+  const isArchiveRoute =
+    useMatch({
+      from: "/_chat/archive",
+      shouldThrow: false,
+    }) !== null;
+  const isSettingsRoute =
+    useMatch({
+      from: "/_chat/settings",
+      shouldThrow: false,
+    }) !== null;
   const preferredProjectId = useMemo(
     () =>
       preferredProjectIdForNewThread({
@@ -630,7 +637,23 @@ export default function Sidebar() {
       }
 
       const fallbackThreadId =
-        threads.find((entry) => entry.id !== threadId && entry.archivedAt === null)?.id ?? null;
+        threads
+          .filter((entry) => entry.id !== threadId && entry.archivedAt === null)
+          .reduce<Thread | null>((latest, entry) => {
+            if (!latest) {
+              return entry;
+            }
+            const latestAt = Date.parse(latest.lastVisitedAt ?? latest.createdAt);
+            const entryAt = Date.parse(entry.lastVisitedAt ?? entry.createdAt);
+            if (Number.isNaN(entryAt)) {
+              return latest;
+            }
+            if (Number.isNaN(latestAt) || entryAt > latestAt) {
+              return entry;
+            }
+            return latest;
+          }, null)
+          ?.id ?? null;
       if (fallbackThreadId) {
         void navigate({
           to: "/$threadId",

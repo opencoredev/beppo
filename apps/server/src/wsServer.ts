@@ -628,11 +628,20 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     yield* Effect.forEach(
       expiredThreadIds,
       (threadId) =>
-        orchestrationEngine.dispatch({
-          type: "thread.delete",
-          commandId: CommandId.makeUnsafe(crypto.randomUUID()),
-          threadId,
-        }),
+        orchestrationEngine
+          .dispatch({
+            type: "thread.delete",
+            commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+            threadId,
+          })
+          .pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("failed to purge expired archived thread", {
+                cause: error,
+                threadId,
+              }),
+            ),
+          ),
       { concurrency: 1, discard: true },
     );
   });
