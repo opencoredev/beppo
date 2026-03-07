@@ -82,7 +82,14 @@ function groupArchivedThreads(threads: Thread[], projects: Project[]): ArchivedT
   }
 
   return groups.toSorted(
-    (left, right) => archivedTimestamp(right.threads[0]!) - archivedTimestamp(left.threads[0]!),
+    (left, right) => {
+      const rightFirstThread = right.threads[0];
+      const leftFirstThread = left.threads[0];
+      if (!rightFirstThread || !leftFirstThread) {
+        return 0;
+      }
+      return archivedTimestamp(rightFirstThread) - archivedTimestamp(leftFirstThread);
+    },
   );
 }
 

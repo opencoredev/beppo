@@ -24,7 +24,7 @@ import { terminalRunningSubprocessFromEvent } from "../terminalActivity";
 import { onServerConfigUpdated, onServerWelcome } from "../wsNativeApi";
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
-import beppoAppIcon from "../../../../icon.jpg";
+import beppoAppIcon from "../assets/icon.jpg";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;

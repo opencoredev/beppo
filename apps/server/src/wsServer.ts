@@ -43,6 +43,7 @@ import {
   Stream,
   Struct,
 } from "effect";
+import * as Semaphore from "effect/Semaphore";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import { createLogger } from "./logger";
@@ -601,54 +602,60 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   let welcomeBootstrapProjectId: ProjectId | undefined;
   let welcomeBootstrapThreadId: ThreadId | undefined;
   const archivedThreadPurgeLastRunAt = yield* Ref.make(0);
-  const purgeExpiredArchivedThreads = Effect.fnUntraced(function* () {
-    const nowMs = Date.now();
-    const shouldRun = yield* Ref.modify(archivedThreadPurgeLastRunAt, (lastRunAt) => {
-      if (nowMs - lastRunAt < ARCHIVED_THREAD_PURGE_INTERVAL_MS) {
-        return [false, lastRunAt] as const;
-      }
-      return [true, nowMs] as const;
-    });
-
-    if (!shouldRun) {
-      return;
-    }
-
-    const snapshot = yield* projectionReadModelQuery.getSnapshot();
-    const expiredThreadIds = snapshot.threads
-      .filter((thread) => {
-        if (thread.deletedAt !== null || thread.archivedAt === null) {
-          return false;
+  const archivedThreadPurgeSemaphore = yield* Semaphore.make(1);
+  const purgeExpiredArchivedThreads = archivedThreadPurgeSemaphore.withPermits(1)(
+    Effect.gen(function* () {
+      const nowMs = Date.now();
+      const shouldRun = yield* Ref.modify(archivedThreadPurgeLastRunAt, (lastRunAt) => {
+        if (nowMs - lastRunAt < ARCHIVED_THREAD_PURGE_INTERVAL_MS) {
+          return [false, lastRunAt] as const;
         }
-        const archivedAtMs = Date.parse(thread.archivedAt);
-        return Number.isFinite(archivedAtMs) && archivedAtMs + ARCHIVED_THREAD_RETENTION_MS <= nowMs;
-      })
-      .map((thread) => thread.id);
+        return [true, nowMs] as const;
+      });
 
-    yield* Effect.forEach(
-      expiredThreadIds,
-      (threadId) =>
-        orchestrationEngine
-          .dispatch({
-            type: "thread.delete",
-            commandId: CommandId.makeUnsafe(crypto.randomUUID()),
-            threadId,
-          })
-          .pipe(
-            Effect.catch((error) =>
-              Effect.logWarning("failed to purge expired archived thread", {
-                cause: error,
-                threadId,
-              }),
+      if (!shouldRun) {
+        return;
+      }
+
+      const snapshot = yield* projectionReadModelQuery.getSnapshot();
+      const expiredThreadIds = snapshot.threads
+        .filter((thread) => {
+          if (thread.deletedAt !== null || thread.archivedAt === null) {
+            return false;
+          }
+          const archivedAtMs = Date.parse(thread.archivedAt);
+          return (
+            Number.isFinite(archivedAtMs) &&
+            archivedAtMs + ARCHIVED_THREAD_RETENTION_MS <= nowMs
+          );
+        })
+        .map((thread) => thread.id);
+
+      yield* Effect.forEach(
+        expiredThreadIds,
+        (threadId) =>
+          orchestrationEngine
+            .dispatch({
+              type: "thread.delete",
+              commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+              threadId,
+            })
+            .pipe(
+              Effect.catch((error) =>
+                Effect.logWarning("failed to purge expired archived thread", {
+                  cause: error,
+                  threadId,
+                }),
+              ),
             ),
-          ),
-      { concurrency: 1, discard: true },
-    );
-  });
+        { concurrency: 1, discard: true },
+      );
+    }),
+  );
 
   if (autoBootstrapProjectFromCwd) {
     yield* Effect.gen(function* () {
-      yield* purgeExpiredArchivedThreads();
+      yield* purgeExpiredArchivedThreads;
       const snapshot = yield* projectionReadModelQuery.getSnapshot();
       const existingProject = snapshot.projects.find(
         (project) => project.workspaceRoot === cwd && project.deletedAt === null,
@@ -733,10 +740,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   );
 
   const routeRequest = Effect.fnUntraced(function* (request: WebSocketRequest) {
-    switch (request.body._tag) {
-      case ORCHESTRATION_WS_METHODS.getSnapshot:
-        yield* purgeExpiredArchivedThreads();
-        return yield* projectionReadModelQuery.getSnapshot();
+      switch (request.body._tag) {
+        case ORCHESTRATION_WS_METHODS.getSnapshot:
+          yield* purgeExpiredArchivedThreads;
+          return yield* projectionReadModelQuery.getSnapshot();
 
       case ORCHESTRATION_WS_METHODS.dispatchCommand: {
         const { command } = request.body;
