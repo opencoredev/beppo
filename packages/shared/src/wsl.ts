@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 
 export const WSL_UNC_HOSTS = ["wsl.localhost", "wsl$"] as const;
+const WSL_UNC_HOST_PATTERN = String.raw`(?:wsl(?:\.localhost)?|wsl\$)`;
 
 export interface WslPath {
   readonly distro: string;
@@ -41,7 +42,7 @@ export function toWslUncPath(input: {
 }
 
 export function isWslUncPath(value: string): boolean {
-  return /^\\\\wsl(?:\.localhost)?\\/i.test(value.trim());
+  return new RegExp(String.raw`^\\\\${WSL_UNC_HOST_PATTERN}\\`, "i").test(value.trim());
 }
 
 export function parseWslPath(
@@ -55,7 +56,9 @@ export function parseWslPath(
     return null;
   }
 
-  const uncMatch = trimmed.match(/^\\\\(wsl(?:\.localhost)?)\\([^\\/]+)(?:[\\/](.*))?$/i);
+  const uncMatch = trimmed.match(
+    new RegExp(String.raw`^\\\\(${WSL_UNC_HOST_PATTERN})\\([^\\/]+)(?:[\\/](.*))?$`, "i"),
+  );
   if (uncMatch) {
     const distro = uncMatch[2]?.trim();
     if (!distro) {
