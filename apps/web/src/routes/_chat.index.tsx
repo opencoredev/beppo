@@ -1,4 +1,3 @@
-import { ThreadId } from "@t3tools/contracts";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 
@@ -6,17 +5,10 @@ import { APP_BASE_NAME } from "../branding";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../components/ui/empty";
 import { isElectron } from "../env";
 import { useComposerDraftStore } from "../composerDraftStore";
+import { normalizeDraftThreadId } from "../lib/routeSearch";
 import { SidebarTrigger } from "../components/ui/sidebar";
 import { useStore } from "../store";
 import { SparklesIcon } from "lucide-react";
-
-function normalizeDraftThreadId(value: unknown): ThreadId | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const normalized = value.trim();
-  return normalized.length > 0 ? ThreadId.makeUnsafe(normalized) : undefined;
-}
 
 function ChatIndexRouteView() {
   const navigate = useNavigate();

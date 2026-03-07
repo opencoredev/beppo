@@ -116,6 +116,7 @@ function ArchiveRouteView() {
   const navigate = useNavigate();
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
+  const threadsHydrated = useStore((store) => store.threadsHydrated);
   const archivedThreads = useMemo(
     () =>
       threads
@@ -508,7 +509,13 @@ function ArchiveRouteView() {
               </div>
             </section>
 
-            {archivedGroups.length === 0 ? (
+            {!threadsHydrated ? (
+              <section className="rounded-2xl border border-border bg-card p-5">
+                <div className="flex min-h-[220px] items-center justify-center">
+                  <p className="text-sm text-muted-foreground">Loading archived chats...</p>
+                </div>
+              </section>
+            ) : archivedGroups.length === 0 ? (
               <section className="rounded-2xl border border-border bg-card p-5">
                 <Empty className="min-h-[280px]">
                   <EmptyMedia variant="icon">

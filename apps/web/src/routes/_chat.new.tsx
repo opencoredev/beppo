@@ -1,4 +1,4 @@
-import { DEFAULT_RUNTIME_MODE, ThreadId } from "@t3tools/contracts";
+import { DEFAULT_RUNTIME_MODE } from "@t3tools/contracts";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo } from "react";
 
@@ -8,18 +8,11 @@ import { APP_BASE_NAME } from "../branding";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { isElectron } from "../env";
 import { ensureProjectDraftThread, preferredProjectIdForNewThread } from "../lib/draftThreads";
+import { normalizeDraftThreadId } from "../lib/routeSearch";
 import { newThreadId } from "../lib/utils";
 import { useStore } from "../store";
 
 type DraftContext = "global" | "project";
-
-function normalizeDraftThreadId(value: unknown): ThreadId | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const normalized = value.trim();
-  return normalized.length > 0 ? ThreadId.makeUnsafe(normalized) : undefined;
-}
 
 function normalizeDraftContext(value: unknown): DraftContext {
   return value === "project" ? "project" : "global";
