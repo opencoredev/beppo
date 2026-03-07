@@ -15,6 +15,7 @@ const BASE_SERVER_PORT = 3773;
 const BASE_WEB_PORT = 5733;
 const MAX_HASH_OFFSET = 3000;
 const MAX_PORT = 65535;
+const TURBO_COMMAND = typeof Bun !== "undefined" ? process.execPath : "bun";
 const LINUX_DESKTOP_DEPENDENCIES = [
   {
     aptPackage: "libwebkit2gtk-4.1-0",
@@ -495,17 +496,13 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       return;
     }
 
-    const child = yield* ChildProcess.make(
-      "turbo",
-      [...MODE_ARGS[input.mode], ...input.turboArgs],
-      {
-        stdin: "inherit",
-        stdout: "inherit",
-        stderr: "inherit",
-        env,
-        extendEnv: false,
-      },
-    );
+    const child = yield* ChildProcess.make(TURBO_COMMAND, ["run", "turbo", ...MODE_ARGS[input.mode], ...input.turboArgs], {
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+      env,
+      extendEnv: false,
+    });
 
     const exitCode = yield* child.exitCode;
     if (exitCode !== 0) {
