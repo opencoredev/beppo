@@ -1,10 +1,10 @@
 # Remote Access Setup
 
-Use this when you want to open T3 Code from another device (phone, tablet, another laptop).
+Use this when you want to open Beppo from another device (phone, tablet, another laptop).
 
 ## CLI ↔ Env option map
 
-The T3 Code CLI accepts the following configuration options, available either as CLI flags or environment variables:
+The Beppo CLI accepts the following configuration options, available either as CLI flags or environment variables:
 
 | CLI flag                | Env var               | Notes                              |
 | ----------------------- | --------------------- | ---------------------------------- |

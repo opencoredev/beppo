@@ -18,6 +18,7 @@ import { createLogger } from "../../logger";
 import { PtyAdapter, PtyAdapterShape, type PtyExitEvent, type PtyProcess } from "../Services/PTY";
 import { runProcess } from "../../processRunner";
 import { ServerConfig } from "../../config";
+import { buildWslProcessCommand, resolveWslWorkspace } from "../../wsl";
 import {
   ShellCandidate,
   TerminalError,
@@ -92,7 +93,24 @@ function uniqueShellCandidates(candidates: Array<ShellCandidate | null>): ShellC
   return ordered;
 }
 
-function resolveShellCandidates(shellResolver: () => string): ShellCandidate[] {
+function resolvePosixShellCandidates(shellResolver: () => string): ShellCandidate[] {
+  return uniqueShellCandidates([
+    shellCandidateFromCommand(normalizeShellCommand(shellResolver())),
+    shellCandidateFromCommand(normalizeShellCommand(process.env.SHELL)),
+    shellCandidateFromCommand("/bin/zsh"),
+    shellCandidateFromCommand("/bin/bash"),
+    shellCandidateFromCommand("/bin/sh"),
+    shellCandidateFromCommand("zsh"),
+    shellCandidateFromCommand("bash"),
+    shellCandidateFromCommand("sh"),
+  ]);
+}
+
+function resolveShellCandidates(shellResolver: () => string, cwd?: string): ShellCandidate[] {
+  if (cwd && resolveWslWorkspace(cwd)) {
+    return resolvePosixShellCandidates(shellResolver);
+  }
+
   const requested = shellCandidateFromCommand(normalizeShellCommand(shellResolver()));
 
   if (process.platform === "win32") {
@@ -104,16 +122,7 @@ function resolveShellCandidates(shellResolver: () => string): ShellCandidate[] {
     ]);
   }
 
-  return uniqueShellCandidates([
-    requested,
-    shellCandidateFromCommand(normalizeShellCommand(process.env.SHELL)),
-    shellCandidateFromCommand("/bin/zsh"),
-    shellCandidateFromCommand("/bin/bash"),
-    shellCandidateFromCommand("/bin/sh"),
-    shellCandidateFromCommand("zsh"),
-    shellCandidateFromCommand("bash"),
-    shellCandidateFromCommand("sh"),
-  ]);
+  return uniqueShellCandidates([requested, ...resolvePosixShellCandidates(shellResolver)]);
 }
 
 function isRetryableShellSpawnError(error: unknown): boolean {
@@ -589,21 +598,32 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     let ptyProcess: PtyProcess | null = null;
     let startedShell: string | null = null;
     try {
-      const shellCandidates = resolveShellCandidates(this.shellResolver);
+      const shellCandidates = resolveShellCandidates(this.shellResolver, session.cwd);
       const terminalEnv = createTerminalSpawnEnv(process.env, session.runtimeEnv);
       let lastSpawnError: unknown = null;
 
-      const spawnWithCandidate = (candidate: ShellCandidate) =>
-        Effect.runPromise(
+      const spawnWithCandidate = (candidate: ShellCandidate) => {
+        const wslCommand = buildWslProcessCommand({
+          command: candidate.shell,
+          ...(candidate.args ? { args: candidate.args } : {}),
+          cwd: session.cwd,
+          env: terminalEnv,
+        });
+        return Effect.runPromise(
           this.ptyAdapter.spawn({
-            shell: candidate.shell,
-            ...(candidate.args ? { args: candidate.args } : {}),
-            cwd: session.cwd,
+            shell: wslCommand?.command ?? candidate.shell,
+            ...(wslCommand?.args
+              ? { args: wslCommand.args }
+              : candidate.args
+                ? { args: candidate.args }
+                : {}),
+            cwd: wslCommand?.cwd ?? session.cwd,
             cols: session.cols,
             rows: session.rows,
-            env: terminalEnv,
+            env: wslCommand?.env ?? terminalEnv,
           }),
         );
+      };
 
       const trySpawn = async (
         candidates: ShellCandidate[],

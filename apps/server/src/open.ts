@@ -12,6 +12,7 @@ import { extname, join } from "node:path";
 
 import { EDITORS, type EditorId } from "@t3tools/contracts";
 import { ServiceMap, Schema, Effect, Layer } from "effect";
+import { toWindowsEditorPath } from "./wsl";
 
 // ==============================
 // Definitions
@@ -205,22 +206,23 @@ export const resolveEditorLaunch = Effect.fnUntraced(function* (
   input: OpenInEditorInput,
   platform: NodeJS.Platform = process.platform,
 ): Effect.fn.Return<EditorLaunch, OpenError> {
+  const resolvedTarget = platform === "win32" ? toWindowsEditorPath(input.cwd) : input.cwd;
   const editorDef = EDITORS.find((editor) => editor.id === input.editor);
   if (!editorDef) {
     return yield* new OpenError({ message: `Unknown editor: ${input.editor}` });
   }
 
   if (editorDef.command) {
-    return shouldUseGotoFlag(editorDef.id, input.cwd)
-      ? { command: editorDef.command, args: ["--goto", input.cwd] }
-      : { command: editorDef.command, args: [input.cwd] };
+    return shouldUseGotoFlag(editorDef.id, resolvedTarget)
+      ? { command: editorDef.command, args: ["--goto", resolvedTarget] }
+      : { command: editorDef.command, args: [resolvedTarget] };
   }
 
   if (editorDef.id !== "file-manager") {
     return yield* new OpenError({ message: `Unsupported editor: ${input.editor}` });
   }
 
-  return { command: fileManagerCommandForPlatform(platform), args: [input.cwd] };
+  return { command: fileManagerCommandForPlatform(platform), args: [resolvedTarget] };
 });
 
 export const launchDetached = (launch: EditorLaunch) =>

@@ -1,11 +1,11 @@
-# T3 Code
+# Beppo
 
-T3 Code is a minimal web GUI for coding agents. Currently Codex-first, with Claude Code support coming soon.
+Beppo is a minimal web GUI for coding agents. Currently Codex-first, with Claude Code support coming soon.
 
 ## How to use
 
 > [!WARNING]
-> You need to have [Codex CLI](https://github.com/openai/codex) installed and authorized for T3 Code to work.
+> You need to have [Codex CLI](https://github.com/openai/codex) installed and authorized for Beppo to work.
 
 ```bash
 npx t3

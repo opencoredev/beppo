@@ -1,12 +1,11 @@
-import type { BrowserWindow } from "electron";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { showMessageBoxMock } = vi.hoisted(() => ({
   showMessageBoxMock: vi.fn(),
 }));
 
-vi.mock("electron", () => ({
-  dialog: {
+vi.mock("./electrobun-runtime", () => ({
+  Utils: {
     showMessageBox: showMessageBoxMock,
   },
 }));
@@ -19,21 +18,19 @@ describe("showDesktopConfirmDialog", () => {
   });
 
   it("returns false and does not open a dialog for empty messages", async () => {
-    const result = await showDesktopConfirmDialog("   ", null);
+    const result = await showDesktopConfirmDialog("   ");
 
     expect(result).toBe(false);
     expect(showMessageBoxMock).not.toHaveBeenCalled();
   });
 
-  it("opens a dialog for the focused window and returns true on confirm", async () => {
-    const ownerWindow = { id: 1 } as BrowserWindow;
+  it("returns true on confirm", async () => {
     showMessageBoxMock.mockResolvedValue({ response: 1 });
 
-    const result = await showDesktopConfirmDialog("Delete worktree?", ownerWindow);
+    const result = await showDesktopConfirmDialog("Delete worktree?");
 
     expect(result).toBe(true);
     expect(showMessageBoxMock).toHaveBeenCalledWith(
-      ownerWindow,
       expect.objectContaining({
         buttons: ["No", "Yes"],
         message: "Delete worktree?",
@@ -41,10 +38,10 @@ describe("showDesktopConfirmDialog", () => {
     );
   });
 
-  it("opens an app-level dialog when there is no focused window", async () => {
+  it("returns false when the dialog is cancelled", async () => {
     showMessageBoxMock.mockResolvedValue({ response: 0 });
 
-    const result = await showDesktopConfirmDialog("Delete worktree?", null);
+    const result = await showDesktopConfirmDialog("Delete worktree?");
 
     expect(result).toBe(false);
     expect(showMessageBoxMock).toHaveBeenCalledWith(

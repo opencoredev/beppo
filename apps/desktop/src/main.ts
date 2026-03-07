@@ -3,22 +3,25 @@ import * as Crypto from "node:crypto";
 import * as FS from "node:fs";
 import * as OS from "node:os";
 import * as Path from "node:path";
+import { pathToFileURL } from "node:url";
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, protocol, shell } from "electron";
-import type { MenuItemConstructorOptions } from "electron";
+import desktopPackageJson from "../package.json" with { type: "json" };
+
+import Electrobun, {
+  ApplicationMenu,
+  BrowserWindow,
+  ContextMenu,
+  Updater,
+  Utils,
+} from "./electrobun-runtime";
 import * as Effect from "effect/Effect";
-import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
-import { autoUpdater } from "electron-updater";
-
-import type { ContextMenuItem } from "@t3tools/contracts";
+import type { ContextMenuItem, DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
 import { NetService } from "@t3tools/shared/Net";
 import { RotatingFileSink } from "@t3tools/shared/logging";
+import { resolveWindowsWslHomePathSync } from "@t3tools/shared/wsl";
+
 import { showDesktopConfirmDialog } from "./confirmDialog";
 import { fixPath } from "./fixPath";
-import {
-  getAutoUpdateDisabledReason,
-  shouldBroadcastDownloadProgress,
-} from "./updateState";
 import {
   createInitialDesktopUpdateState,
   reduceDesktopUpdateStateOnCheckFailure,
@@ -34,24 +37,22 @@ import {
 
 fixPath();
 
-const PICK_FOLDER_CHANNEL = "desktop:pick-folder";
-const CONFIRM_CHANNEL = "desktop:confirm";
-const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
-const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
-const MENU_ACTION_CHANNEL = "desktop:menu-action";
-const UPDATE_STATE_CHANNEL = "desktop:update-state";
-const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
-const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
-const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
+const PICK_FOLDER_METHOD = "pickFolder";
+const CONFIRM_METHOD = "confirm";
+const CONTEXT_MENU_METHOD = "showContextMenu";
+const OPEN_EXTERNAL_METHOD = "openExternal";
+const UPDATE_GET_STATE_METHOD = "getUpdateState";
+const UPDATE_DOWNLOAD_METHOD = "downloadUpdate";
+const UPDATE_INSTALL_METHOD = "installUpdate";
+
+const MENU_ACTION_EVENT = "menu-action";
+const UPDATE_STATE_EVENT = "update-state";
+
 const STATE_DIR =
   process.env.T3CODE_STATE_DIR?.trim() || Path.join(OS.homedir(), ".t3", "userdata");
-const DESKTOP_SCHEME = "t3";
-const ROOT_DIR = Path.resolve(__dirname, "../../..");
+const ROOT_DIR = Path.resolve(import.meta.dir, "..");
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
-const APP_DISPLAY_NAME = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
-const APP_USER_MODEL_ID = "com.t3tools.t3code";
-const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
-const COMMIT_HASH_DISPLAY_LENGTH = 12;
+const APP_DISPLAY_NAME = isDevelopment ? "Beppo (Dev)" : desktopPackageJson.productName ?? "Beppo";
 const LOG_DIR = Path.join(STATE_DIR, "logs");
 const LOG_FILE_MAX_BYTES = 10 * 1024 * 1024;
 const LOG_FILE_MAX_FILES = 10;
@@ -61,7 +62,40 @@ const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
 
-let mainWindow: BrowserWindow | null = null;
+interface DesktopBridgeRequestEnvelope {
+  readonly kind: "request";
+  readonly id: string;
+  readonly method: string;
+  readonly params?: unknown;
+}
+
+interface DesktopBridgeResponseEnvelope {
+  readonly kind: "response";
+  readonly id: string;
+  readonly ok: boolean;
+  readonly result?: unknown;
+  readonly error?: string;
+}
+
+interface DesktopBridgeEventEnvelope {
+  readonly kind: "event";
+  readonly event: string;
+  readonly payload: unknown;
+}
+
+interface PendingContextMenuRequest {
+  readonly resolve: (value: string | null) => void;
+  readonly timeout: ReturnType<typeof setTimeout>;
+}
+
+type DesktopWindow = InstanceType<typeof BrowserWindow>;
+type UpdaterStatusEntry = {
+  readonly status: string;
+  readonly message: string;
+  readonly details?: { progress?: number };
+};
+
+let mainWindow: DesktopWindow | null = null;
 let backendProcess: ChildProcess.ChildProcess | null = null;
 let backendPort = 0;
 let backendAuthToken = "";
@@ -69,14 +103,15 @@ let backendWsUrl = "";
 let restartAttempt = 0;
 let restartTimer: ReturnType<typeof setTimeout> | null = null;
 let isQuitting = false;
-let desktopProtocolRegistered = false;
-let aboutCommitHashCache: string | null | undefined;
 let desktopLogSink: RotatingFileSink | null = null;
 let backendLogSink: RotatingFileSink | null = null;
-let restoreStdIoCapture: (() => void) | null = null;
+let updatePollTimer: ReturnType<typeof setInterval> | null = null;
+let updateStartupTimer: ReturnType<typeof setTimeout> | null = null;
+let updateCheckInFlight = false;
+let updateDownloadInFlight = false;
+let updateState: DesktopUpdateState;
 
-let destructiveMenuIconCache: Electron.NativeImage | null | undefined;
-const initialUpdateState = (): DesktopUpdateState => createInitialDesktopUpdateState(app.getVersion());
+const pendingContextMenus = new Map<string, PendingContextMenuRequest>();
 
 function logTimestamp(): string {
   return new Date().toISOString();
@@ -90,83 +125,23 @@ function sanitizeLogValue(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function writeDesktopLogHeader(message: string): void {
+function writeDesktopLog(message: string): void {
   if (!desktopLogSink) return;
   desktopLogSink.write(`[${logTimestamp()}] [${logScope("desktop")}] ${message}\n`);
 }
 
 function writeBackendSessionBoundary(phase: "START" | "END", details: string): void {
   if (!backendLogSink) return;
-  const normalizedDetails = sanitizeLogValue(details);
   backendLogSink.write(
-    `[${logTimestamp()}] ---- APP SESSION ${phase} run=${APP_RUN_ID} ${normalizedDetails} ----\n`,
+    `[${logTimestamp()}] ---- APP SESSION ${phase} run=${APP_RUN_ID} ${sanitizeLogValue(details)} ----\n`,
   );
 }
 
 function formatErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
+  return error instanceof Error ? error.message : String(error);
 }
 
-function writeDesktopStreamChunk(
-  streamName: "stdout" | "stderr",
-  chunk: unknown,
-  encoding: BufferEncoding | undefined,
-): void {
-  if (!desktopLogSink) return;
-  const buffer = Buffer.isBuffer(chunk)
-    ? chunk
-    : Buffer.from(String(chunk), typeof chunk === "string" ? encoding : undefined);
-  desktopLogSink.write(`[${logTimestamp()}] [${logScope(streamName)}] `);
-  desktopLogSink.write(buffer);
-  if (buffer.length === 0 || buffer[buffer.length - 1] !== 0x0a) {
-    desktopLogSink.write("\n");
-  }
-}
-
-function installStdIoCapture(): void {
-  if (!app.isPackaged || desktopLogSink === null || restoreStdIoCapture !== null) {
-    return;
-  }
-
-  const originalStdoutWrite = process.stdout.write.bind(process.stdout);
-  const originalStderrWrite = process.stderr.write.bind(process.stderr);
-
-  const patchWrite =
-    (streamName: "stdout" | "stderr", originalWrite: typeof process.stdout.write) =>
-    (
-      chunk: string | Uint8Array,
-      encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
-      callback?: (error?: Error | null) => void,
-    ): boolean => {
-      const encoding = typeof encodingOrCallback === "string" ? encodingOrCallback : undefined;
-      writeDesktopStreamChunk(streamName, chunk, encoding);
-      if (typeof encodingOrCallback === "function") {
-        return originalWrite(chunk, encodingOrCallback);
-      }
-      if (callback !== undefined) {
-        return originalWrite(chunk, encoding, callback);
-      }
-      if (encoding !== undefined) {
-        return originalWrite(chunk, encoding);
-      }
-      return originalWrite(chunk);
-    };
-
-  process.stdout.write = patchWrite("stdout", originalStdoutWrite);
-  process.stderr.write = patchWrite("stderr", originalStderrWrite);
-
-  restoreStdIoCapture = () => {
-    process.stdout.write = originalStdoutWrite;
-    process.stderr.write = originalStderrWrite;
-    restoreStdIoCapture = null;
-  };
-}
-
-function initializePackagedLogging(): void {
-  if (!app.isPackaged) return;
+function initializeLogging(): void {
   try {
     desktopLogSink = new RotatingFileSink({
       filePath: Path.join(LOG_DIR, "desktop-main.log"),
@@ -178,167 +153,29 @@ function initializePackagedLogging(): void {
       maxBytes: LOG_FILE_MAX_BYTES,
       maxFiles: LOG_FILE_MAX_FILES,
     });
-    installStdIoCapture();
-    writeDesktopLogHeader(`runtime log capture enabled logDir=${LOG_DIR}`);
   } catch (error) {
-    // Logging setup should never block app startup.
-    console.error("[desktop] failed to initialize packaged logging", error);
+    console.error("[desktop] failed to initialize logging", error);
   }
 }
 
 function captureBackendOutput(child: ChildProcess.ChildProcess): void {
-  if (!app.isPackaged || backendLogSink === null) return;
+  if (!backendLogSink) return;
   const writeChunk = (chunk: unknown): void => {
     if (!backendLogSink) return;
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), "utf8");
-    backendLogSink.write(buffer);
+    backendLogSink.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), "utf8"));
   };
   child.stdout?.on("data", writeChunk);
   child.stderr?.on("data", writeChunk);
 }
 
-initializePackagedLogging();
-
-function getDestructiveMenuIcon(): Electron.NativeImage | undefined {
-  if (process.platform !== "darwin") return undefined;
-  if (destructiveMenuIconCache !== undefined) {
-    return destructiveMenuIconCache ?? undefined;
-  }
-  try {
-    const icon = nativeImage.createFromNamedImage("trash").resize({
-      width: 14,
-      height: 14,
-    });
-    if (icon.isEmpty()) {
-      destructiveMenuIconCache = null;
-      return undefined;
-    }
-    icon.setTemplateImage(true);
-    destructiveMenuIconCache = icon;
-    return icon;
-  } catch {
-    destructiveMenuIconCache = null;
-    return undefined;
-  }
-}
-let updatePollTimer: ReturnType<typeof setInterval> | null = null;
-let updateStartupTimer: ReturnType<typeof setTimeout> | null = null;
-let updateCheckInFlight = false;
-let updateDownloadInFlight = false;
-let updaterConfigured = false;
-let updateState: DesktopUpdateState = initialUpdateState();
-
-function resolveUpdaterErrorContext(): DesktopUpdateErrorContext {
-  if (updateDownloadInFlight) return "download";
-  if (updateCheckInFlight) return "check";
-  return updateState.errorContext;
-}
-
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: DESKTOP_SCHEME,
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: true,
-    },
-  },
-]);
-
-function resolveAppRoot(): string {
-  if (!app.isPackaged) {
-    return ROOT_DIR;
-  }
-  return app.getAppPath();
-}
-
-/** Read the baked-in app-update.yml config (if applicable). */
-function readAppUpdateYml(): Record<string, string> | null {
-  try {
-    // electron-updater reads from process.resourcesPath in packaged builds,
-    // or dev-app-update.yml via app.getAppPath() in dev.
-    const ymlPath = app.isPackaged
-      ? Path.join(process.resourcesPath, "app-update.yml")
-      : Path.join(app.getAppPath(), "dev-app-update.yml");
-    const raw = FS.readFileSync(ymlPath, "utf-8");
-    // The YAML is simple key-value pairs — avoid pulling in a YAML parser by
-    // doing a line-based parse (fields: provider, owner, repo, releaseType, …).
-    const entries: Record<string, string> = {};
-    for (const line of raw.split("\n")) {
-      const match = line.match(/^(\w+):\s*(.+)$/);
-      if (match?.[1] && match[2]) entries[match[1]] = match[2].trim();
-    }
-    return entries.provider ? entries : null;
-  } catch {
-    return null;
-  }
-}
-
-function normalizeCommitHash(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const trimmed = value.trim();
-  if (!COMMIT_HASH_PATTERN.test(trimmed)) {
-    return null;
-  }
-  return trimmed.slice(0, COMMIT_HASH_DISPLAY_LENGTH).toLowerCase();
-}
-
-function resolveEmbeddedCommitHash(): string | null {
-  const packageJsonPath = Path.join(resolveAppRoot(), "package.json");
-  if (!FS.existsSync(packageJsonPath)) {
-    return null;
-  }
-
-  try {
-    const raw = FS.readFileSync(packageJsonPath, "utf8");
-    const parsed = JSON.parse(raw) as { t3codeCommitHash?: unknown };
-    return normalizeCommitHash(parsed.t3codeCommitHash);
-  } catch {
-    return null;
-  }
-}
-
-function resolveAboutCommitHash(): string | null {
-  if (aboutCommitHashCache !== undefined) {
-    return aboutCommitHashCache;
-  }
-
-  const envCommitHash = normalizeCommitHash(process.env.T3CODE_COMMIT_HASH);
-  if (envCommitHash) {
-    aboutCommitHashCache = envCommitHash;
-    return aboutCommitHashCache;
-  }
-
-  // Only packaged builds are required to expose commit metadata.
-  if (!app.isPackaged) {
-    aboutCommitHashCache = null;
-    return aboutCommitHashCache;
-  }
-
-  aboutCommitHashCache = resolveEmbeddedCommitHash();
-
-  return aboutCommitHashCache;
-}
-
 function resolveBackendEntry(): string {
-  return Path.join(resolveAppRoot(), "apps/server/dist/index.mjs");
-}
-
-function resolveBackendCwd(): string {
-  if (!app.isPackaged) {
-    return resolveAppRoot();
-  }
-  return OS.homedir();
+  return Path.join(ROOT_DIR, "apps/server/dist/index.mjs");
 }
 
 function resolveDesktopStaticDir(): string | null {
-  const appRoot = resolveAppRoot();
   const candidates = [
-    Path.join(appRoot, "apps/server/dist/client"),
-    Path.join(appRoot, "apps/web/dist"),
+    Path.join(ROOT_DIR, "apps/server/dist/client"),
+    Path.join(ROOT_DIR, "apps/web/dist"),
   ];
 
   for (const candidate of candidates) {
@@ -350,250 +187,58 @@ function resolveDesktopStaticDir(): string | null {
   return null;
 }
 
-function resolveDesktopStaticPath(staticRoot: string, requestUrl: string): string {
-  const url = new URL(requestUrl);
-  const rawPath = decodeURIComponent(url.pathname);
-  const normalizedPath = Path.posix.normalize(rawPath).replace(/^\/+/, "");
-  if (normalizedPath.includes("..")) {
-    return Path.join(staticRoot, "index.html");
-  }
-
-  const requestedPath = normalizedPath.length > 0 ? normalizedPath : "index.html";
-  const resolvedPath = Path.join(staticRoot, requestedPath);
-
-  if (Path.extname(resolvedPath)) {
-    return resolvedPath;
-  }
-
-  const nestedIndex = Path.join(resolvedPath, "index.html");
-  if (FS.existsSync(nestedIndex)) {
-    return nestedIndex;
-  }
-
-  return Path.join(staticRoot, "index.html");
-}
-
-function isStaticAssetRequest(requestUrl: string): boolean {
-  try {
-    const url = new URL(requestUrl);
-    return Path.extname(url.pathname).length > 0;
-  } catch {
-    return false;
-  }
-}
-
-function handleFatalStartupError(stage: string, error: unknown): void {
-  const message = formatErrorMessage(error);
-  const detail =
-    error instanceof Error && typeof error.stack === "string" ? `\n${error.stack}` : "";
-  writeDesktopLogHeader(`fatal startup error stage=${stage} message=${message}`);
-  console.error(`[desktop] fatal startup error (${stage})`, error);
-  if (!isQuitting) {
-    isQuitting = true;
-    dialog.showErrorBox("T3 Code failed to start", `Stage: ${stage}\n${message}${detail}`);
-  }
-  stopBackend();
-  restoreStdIoCapture?.();
-  app.quit();
-}
-
-function registerDesktopProtocol(): void {
-  if (isDevelopment || desktopProtocolRegistered) return;
-
-  const staticRoot = resolveDesktopStaticDir();
-  if (!staticRoot) {
-    throw new Error(
-      "Desktop static bundle missing. Build apps/server (with bundled client) first.",
-    );
-  }
-
-  const staticRootResolved = Path.resolve(staticRoot);
-  const staticRootPrefix = `${staticRootResolved}${Path.sep}`;
-  const fallbackIndex = Path.join(staticRootResolved, "index.html");
-
-  protocol.registerFileProtocol(DESKTOP_SCHEME, (request, callback) => {
-    try {
-      const candidate = resolveDesktopStaticPath(staticRootResolved, request.url);
-      const resolvedCandidate = Path.resolve(candidate);
-      const isInRoot =
-        resolvedCandidate === fallbackIndex || resolvedCandidate.startsWith(staticRootPrefix);
-      const isAssetRequest = isStaticAssetRequest(request.url);
-
-      if (!isInRoot || !FS.existsSync(resolvedCandidate)) {
-        if (isAssetRequest) {
-          callback({ error: -6 });
-          return;
+function resolveWindowUrl(): string {
+  const baseUrl = isDevelopment
+    ? process.env.VITE_DEV_SERVER_URL
+    : (() => {
+        const staticRoot = resolveDesktopStaticDir();
+        if (!staticRoot) {
+          throw new Error("Desktop static bundle missing. Build apps/server (with bundled client) first.");
         }
-        callback({ path: fallbackIndex });
-        return;
-      }
+        return pathToFileURL(Path.join(staticRoot, "index.html")).toString();
+      })();
 
-      callback({ path: resolvedCandidate });
-    } catch {
-      callback({ path: fallbackIndex });
-    }
-  });
+  if (!baseUrl) {
+    throw new Error("Desktop runtime missing VITE_DEV_SERVER_URL.");
+  }
 
-  desktopProtocolRegistered = true;
+  const resolved = new URL(baseUrl);
+  resolved.searchParams.set("t3DesktopWsUrl", backendWsUrl);
+  return resolved.toString();
 }
 
-function dispatchMenuAction(action: string): void {
-  const existingWindow =
-    BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];
-  const targetWindow = existingWindow ?? createWindow();
-  if (!existingWindow) {
-    mainWindow = targetWindow;
-  }
-
-  const send = () => {
-    if (targetWindow.isDestroyed()) return;
-    targetWindow.webContents.send(MENU_ACTION_CHANNEL, action);
-    if (!targetWindow.isVisible()) {
-      targetWindow.show();
-    }
-    targetWindow.focus();
-  };
-
-  if (targetWindow.webContents.isLoadingMainFrame()) {
-    targetWindow.webContents.once("did-finish-load", send);
-    return;
-  }
-
-  send();
+function resolvePreloadPath(): string {
+  return Path.join(ROOT_DIR, "preload.js");
 }
 
-function handleCheckForUpdatesMenuClick(): void {
-  const disabledReason = getAutoUpdateDisabledReason({
-    isDevelopment,
-    isPackaged: app.isPackaged,
-    platform: process.platform,
-    appImage: process.env.APPIMAGE,
-    disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
-  });
-  if (disabledReason) {
-    console.info("[desktop-updater] Manual update check requested, but updates are disabled.");
-    void dialog.showMessageBox({
-      type: "info",
-      title: "Updates unavailable",
-      message: "Automatic updates are not available right now.",
-      detail: disabledReason,
-      buttons: ["OK"],
-    });
-    return;
-  }
-
-  if (!BrowserWindow.getAllWindows().length) {
-    mainWindow = createWindow();
-  }
-  void checkForUpdates("menu");
+function createResponse(
+  id: string,
+  input: { readonly ok: true; readonly result?: unknown } | { readonly ok: false; readonly error: string },
+): DesktopBridgeResponseEnvelope {
+  return input.ok
+    ? { kind: "response", id, ok: true, ...(input.result !== undefined ? { result: input.result } : {}) }
+    : { kind: "response", id, ok: false, error: input.error };
 }
 
-function configureApplicationMenu(): void {
-  const template: MenuItemConstructorOptions[] = [];
-
-  if (process.platform === "darwin") {
-    template.push({
-      label: app.name,
-      submenu: [
-        { role: "about" },
-        {
-          label: "Check for Updates...",
-          click: () => handleCheckForUpdatesMenuClick(),
-        },
-        { type: "separator" },
-        {
-          label: "Settings...",
-          accelerator: "CmdOrCtrl+,",
-          click: () => dispatchMenuAction("open-settings"),
-        },
-        { type: "separator" },
-        { role: "services" },
-        { type: "separator" },
-        { role: "hide" },
-        { role: "hideOthers" },
-        { role: "unhide" },
-        { type: "separator" },
-        { role: "quit" },
-      ],
-    });
-  }
-
-  template.push(
-    {
-      label: "File",
-      submenu: [
-        ...(process.platform === "darwin"
-          ? []
-          : [
-              {
-                label: "Settings...",
-                accelerator: "CmdOrCtrl+,",
-                click: () => dispatchMenuAction("open-settings"),
-              },
-              { type: "separator" as const },
-            ]),
-        { role: process.platform === "darwin" ? "close" : "quit" },
-      ],
-    },
-    { role: "editMenu" },
-    { role: "viewMenu" },
-    { role: "windowMenu" },
-    {
-      role: "help",
-      submenu: [
-        {
-          label: "Check for Updates...",
-          click: () => handleCheckForUpdatesMenuClick(),
-        },
-      ],
-    },
-  );
-
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+function sendBridgeMessage(message: DesktopBridgeResponseEnvelope | DesktopBridgeEventEnvelope): void {
+  if (!mainWindow) return;
+  mainWindow.webview.sendMessageToWebviewViaExecute(message);
 }
 
-function resolveResourcePath(fileName: string): string | null {
-  const candidates = [
-    Path.join(__dirname, "../resources", fileName),
-    Path.join(process.resourcesPath, "resources", fileName),
-    Path.join(process.resourcesPath, fileName),
-  ];
-
-  for (const candidate of candidates) {
-    if (FS.existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  return null;
+function broadcastBridgeEvent(event: string, payload: unknown): void {
+  sendBridgeMessage({ kind: "event", event, payload });
 }
 
-function resolveIconPath(ext: "ico" | "icns" | "png"): string | null {
-  return resolveResourcePath(`icon.${ext}`);
+function emitUpdateState(): void {
+  broadcastBridgeEvent(UPDATE_STATE_EVENT, updateState);
 }
 
-function configureAppIdentity(): void {
-  app.setName(APP_DISPLAY_NAME);
-  const commitHash = resolveAboutCommitHash();
-  app.setAboutPanelOptions({
-    applicationName: APP_DISPLAY_NAME,
-    applicationVersion: app.getVersion(),
-    version: commitHash ?? "unknown",
-  });
-
-  if (process.platform === "win32") {
-    app.setAppUserModelId(APP_USER_MODEL_ID);
-  }
-
-  if (process.platform === "darwin" && app.dock) {
-    const iconPath = resolveIconPath("png");
-    if (iconPath) {
-      app.dock.setIcon(iconPath);
-    }
-  }
+function setUpdateState(patch: Partial<DesktopUpdateState>): void {
+  updateState = { ...updateState, ...patch };
+  emitUpdateState();
 }
 
-function clearUpdatePollTimer(): void {
+function clearUpdateTimers(): void {
   if (updateStartupTimer) {
     clearTimeout(updateStartupTimer);
     updateStartupTimer = null;
@@ -604,68 +249,137 @@ function clearUpdatePollTimer(): void {
   }
 }
 
-function emitUpdateState(): void {
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (window.isDestroyed()) continue;
-    window.webContents.send(UPDATE_STATE_CHANNEL, updateState);
+function normalizeUpdaterErrorContext(): DesktopUpdateErrorContext {
+  if (updateDownloadInFlight) return "download";
+  if (updateCheckInFlight) return "check";
+  return updateState.errorContext;
+}
+
+async function resolveAutoUpdateEnabled(): Promise<boolean> {
+  if (isDevelopment) return false;
+
+  try {
+    const channel = await Updater.localInfo.channel();
+    if (channel === "dev") {
+      return false;
+    }
+    await Updater.channelBucketUrl();
+    return true;
+  } catch {
+    return false;
   }
 }
 
-function setUpdateState(patch: Partial<DesktopUpdateState>): void {
-  updateState = { ...updateState, ...patch };
-  emitUpdateState();
-}
-
-function shouldEnableAutoUpdates(): boolean {
-  return (
-    getAutoUpdateDisabledReason({
-      isDevelopment,
-      isPackaged: app.isPackaged,
-      platform: process.platform,
-      appImage: process.env.APPIMAGE,
-      disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
-    }) === null
-  );
+function syncUpdateStateFromUpdaterEntry(entry: UpdaterStatusEntry): void {
+  switch (entry.status) {
+    case "checking": {
+      setUpdateState(reduceDesktopUpdateStateOnCheckStart(updateState, new Date().toISOString()));
+      return;
+    }
+    case "no-update": {
+      setUpdateState(reduceDesktopUpdateStateOnNoUpdate(updateState, new Date().toISOString()));
+      return;
+    }
+    case "update-available": {
+      const availableVersion = Updater.updateInfo()?.version ?? updateState.availableVersion ?? "unknown";
+      setUpdateState(
+        reduceDesktopUpdateStateOnUpdateAvailable(updateState, availableVersion, new Date().toISOString()),
+      );
+      return;
+    }
+    case "download-starting":
+    case "downloading":
+    case "checking-local-tar":
+    case "local-tar-found":
+    case "local-tar-missing":
+    case "fetching-patch":
+    case "patch-found":
+    case "patch-not-found":
+    case "downloading-patch":
+    case "applying-patch":
+    case "patch-applied":
+    case "patch-chain-complete":
+    case "downloading-full-bundle":
+    case "decompressing":
+    case "extracting":
+    case "replacing-app":
+    case "launching-new-version": {
+      if (updateState.status !== "downloading") {
+        setUpdateState(reduceDesktopUpdateStateOnDownloadStart(updateState));
+      }
+      if (typeof entry.details?.progress === "number") {
+        setUpdateState(reduceDesktopUpdateStateOnDownloadProgress(updateState, entry.details.progress));
+      }
+      return;
+    }
+    case "download-progress": {
+      if (typeof entry.details?.progress === "number") {
+        setUpdateState(reduceDesktopUpdateStateOnDownloadProgress(updateState, entry.details.progress));
+      }
+      return;
+    }
+    case "download-complete":
+    case "complete": {
+      const version = Updater.updateInfo()?.version ?? updateState.availableVersion ?? updateState.currentVersion;
+      setUpdateState(reduceDesktopUpdateStateOnDownloadComplete(updateState, version));
+      return;
+    }
+    case "error": {
+      setUpdateState({
+        status: "error",
+        message: entry.message,
+        checkedAt: new Date().toISOString(),
+        downloadPercent: null,
+        errorContext: normalizeUpdaterErrorContext(),
+        canRetry: updateState.availableVersion !== null || updateState.downloadedVersion !== null,
+      });
+      return;
+    }
+    default:
+      return;
+  }
 }
 
 async function checkForUpdates(reason: string): Promise<void> {
-  if (isQuitting || !updaterConfigured || updateCheckInFlight) return;
+  if (isQuitting || !updateState.enabled || updateCheckInFlight) return;
   if (updateState.status === "downloading" || updateState.status === "downloaded") {
-    console.info(
-      `[desktop-updater] Skipping update check (${reason}) while status=${updateState.status}.`,
-    );
+    writeDesktopLog(`skipping update check (${reason}) while status=${updateState.status}`);
     return;
   }
+
   updateCheckInFlight = true;
   setUpdateState(reduceDesktopUpdateStateOnCheckStart(updateState, new Date().toISOString()));
-  console.info(`[desktop-updater] Checking for updates (${reason})...`);
 
   try {
-    await autoUpdater.checkForUpdates();
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    setUpdateState(reduceDesktopUpdateStateOnCheckFailure(updateState, message, new Date().toISOString()));
-    console.error(`[desktop-updater] Failed to check for updates: ${message}`);
+    await Updater.checkForUpdate();
+  } catch (error) {
+    setUpdateState(
+      reduceDesktopUpdateStateOnCheckFailure(
+        updateState,
+        formatErrorMessage(error),
+        new Date().toISOString(),
+      ),
+    );
   } finally {
     updateCheckInFlight = false;
   }
 }
 
 async function downloadAvailableUpdate(): Promise<{ accepted: boolean; completed: boolean }> {
-  if (!updaterConfigured || updateDownloadInFlight || updateState.status !== "available") {
+  if (!updateState.enabled || updateDownloadInFlight || updateState.status !== "available") {
     return { accepted: false, completed: false };
   }
+
   updateDownloadInFlight = true;
   setUpdateState(reduceDesktopUpdateStateOnDownloadStart(updateState));
-  console.info("[desktop-updater] Downloading update...");
 
   try {
-    await autoUpdater.downloadUpdate();
+    await Updater.downloadUpdate();
+    const version = Updater.updateInfo()?.version ?? updateState.availableVersion ?? updateState.currentVersion;
+    setUpdateState(reduceDesktopUpdateStateOnDownloadComplete(updateState, version));
     return { accepted: true, completed: true };
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    setUpdateState(reduceDesktopUpdateStateOnDownloadFailure(updateState, message));
-    console.error(`[desktop-updater] Failed to download update: ${message}`);
+  } catch (error) {
+    setUpdateState(reduceDesktopUpdateStateOnDownloadFailure(updateState, formatErrorMessage(error)));
     return { accepted: true, completed: false };
   } finally {
     updateDownloadInFlight = false;
@@ -673,120 +387,43 @@ async function downloadAvailableUpdate(): Promise<{ accepted: boolean; completed
 }
 
 async function installDownloadedUpdate(): Promise<{ accepted: boolean; completed: boolean }> {
-  if (isQuitting || !updaterConfigured || updateState.status !== "downloaded") {
+  if (isQuitting || !updateState.enabled || updateState.status !== "downloaded") {
     return { accepted: false, completed: false };
   }
 
   isQuitting = true;
-  clearUpdatePollTimer();
+  clearUpdateTimers();
   try {
     await stopBackendAndWaitForExit();
-    autoUpdater.quitAndInstall();
+    await Updater.applyUpdate();
     return { accepted: true, completed: true };
-  } catch (error: unknown) {
-    const message = formatErrorMessage(error);
+  } catch (error) {
     isQuitting = false;
-    setUpdateState(reduceDesktopUpdateStateOnInstallFailure(updateState, message));
-    console.error(`[desktop-updater] Failed to install update: ${message}`);
+    setUpdateState(reduceDesktopUpdateStateOnInstallFailure(updateState, formatErrorMessage(error)));
     return { accepted: true, completed: false };
   }
 }
 
 function configureAutoUpdater(): void {
-  const enabled = shouldEnableAutoUpdates();
-  setUpdateState({
-    ...createInitialDesktopUpdateState(app.getVersion()),
-    enabled,
-    status: enabled ? "idle" : "disabled",
-  });
-  if (!enabled) {
+  if (!updateState.enabled) {
     return;
   }
-  updaterConfigured = true;
 
-  const githubToken =
-    process.env.T3CODE_DESKTOP_UPDATE_GITHUB_TOKEN?.trim() ||
-    process.env.GH_TOKEN?.trim() ||
-    "";
-  if (githubToken) {
-    // When a token is provided, re-configure the feed with `private: true` so
-    // electron-updater uses the GitHub API (api.github.com) instead of the
-    // public Atom feed (github.com/…/releases.atom) which rejects Bearer auth.
-    const appUpdateYml = readAppUpdateYml();
-    if (appUpdateYml?.provider === "github") {
-      autoUpdater.setFeedURL({
-        ...appUpdateYml,
-        provider: "github" as const,
-        private: true,
-        token: githubToken,
-      });
-    }
-  }
-
-  autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = false;
-  autoUpdater.allowPrerelease = app.getVersion().includes("-");
-  let lastLoggedDownloadMilestone = -1;
-
-  autoUpdater.on("checking-for-update", () => {
-    console.info("[desktop-updater] Looking for updates...");
-  });
-  autoUpdater.on("update-available", (info) => {
-    setUpdateState(reduceDesktopUpdateStateOnUpdateAvailable(updateState, info.version, new Date().toISOString()));
-    lastLoggedDownloadMilestone = -1;
-    console.info(`[desktop-updater] Update available: ${info.version}`);
-  });
-  autoUpdater.on("update-not-available", () => {
-    setUpdateState(reduceDesktopUpdateStateOnNoUpdate(updateState, new Date().toISOString()));
-    lastLoggedDownloadMilestone = -1;
-    console.info("[desktop-updater] No updates available.");
-  });
-  autoUpdater.on("error", (error) => {
-    const message = formatErrorMessage(error);
-    if (!updateCheckInFlight && !updateDownloadInFlight) {
-      setUpdateState({
-        status: "error",
-        message,
-        checkedAt: new Date().toISOString(),
-        downloadPercent: null,
-        errorContext: resolveUpdaterErrorContext(),
-        canRetry: updateState.availableVersion !== null || updateState.downloadedVersion !== null,
-      });
-    }
-    console.error(`[desktop-updater] Updater error: ${message}`);
-  });
-  autoUpdater.on("download-progress", (progress) => {
-    const percent = Math.floor(progress.percent);
-    if (
-      shouldBroadcastDownloadProgress(updateState, progress.percent) ||
-      updateState.message !== null
-    ) {
-      setUpdateState(reduceDesktopUpdateStateOnDownloadProgress(updateState, progress.percent));
-    }
-    const milestone = percent - (percent % 10);
-    if (milestone > lastLoggedDownloadMilestone) {
-      lastLoggedDownloadMilestone = milestone;
-      console.info(`[desktop-updater] Download progress: ${percent}%`);
-    }
-  });
-  autoUpdater.on("update-downloaded", (info) => {
-    setUpdateState(reduceDesktopUpdateStateOnDownloadComplete(updateState, info.version));
-    console.info(`[desktop-updater] Update downloaded: ${info.version}`);
+  Updater.onStatusChange((entry: unknown) => {
+    syncUpdateStateFromUpdaterEntry(entry as UpdaterStatusEntry);
   });
 
-  clearUpdatePollTimer();
-
+  clearUpdateTimers();
   updateStartupTimer = setTimeout(() => {
     updateStartupTimer = null;
     void checkForUpdates("startup");
   }, AUTO_UPDATE_STARTUP_DELAY_MS);
-  updateStartupTimer.unref();
 
   updatePollTimer = setInterval(() => {
     void checkForUpdates("poll");
   }, AUTO_UPDATE_POLL_INTERVAL_MS);
-  updatePollTimer.unref();
 }
+
 function backendEnv(): NodeJS.ProcessEnv {
   return {
     ...process.env,
@@ -803,7 +440,7 @@ function scheduleBackendRestart(reason: string): void {
 
   const delayMs = Math.min(500 * 2 ** restartAttempt, 10_000);
   restartAttempt += 1;
-  console.error(`[desktop] backend exited unexpectedly (${reason}); restarting in ${delayMs}ms`);
+  writeDesktopLog(`backend exited unexpectedly (${reason}); restarting in ${delayMs}ms`);
 
   restartTimer = setTimeout(() => {
     restartTimer = null;
@@ -820,16 +457,10 @@ function startBackend(): void {
     return;
   }
 
-  const captureBackendLogs = app.isPackaged && backendLogSink !== null;
   const child = ChildProcess.spawn(process.execPath, [backendEntry], {
-    cwd: resolveBackendCwd(),
-    // In Electron main, process.execPath points to the Electron binary.
-    // Run the child in Node mode so this backend process does not become a GUI app instance.
-    env: {
-      ...backendEnv(),
-      ELECTRON_RUN_AS_NODE: "1",
-    },
-    stdio: captureBackendLogs ? ["ignore", "pipe", "pipe"] : "inherit",
+    cwd: isDevelopment ? Path.resolve(ROOT_DIR, "../..") : OS.homedir(),
+    env: backendEnv(),
+    stdio: backendLogSink ? ["ignore", "pipe", "pipe"] : "inherit",
   });
   backendProcess = child;
   let backendSessionClosed = false;
@@ -838,10 +469,8 @@ function startBackend(): void {
     backendSessionClosed = true;
     writeBackendSessionBoundary("END", details);
   };
-  writeBackendSessionBoundary(
-    "START",
-    `pid=${child.pid ?? "unknown"} port=${backendPort} cwd=${resolveBackendCwd()}`,
-  );
+
+  writeBackendSessionBoundary("START", `pid=${child.pid ?? "unknown"} port=${backendPort}`);
   captureBackendOutput(child);
 
   child.once("spawn", () => {
@@ -860,12 +489,9 @@ function startBackend(): void {
     if (backendProcess === child) {
       backendProcess = null;
     }
-    closeBackendSession(
-      `pid=${child.pid ?? "unknown"} code=${code ?? "null"} signal=${signal ?? "null"}`,
-    );
+    closeBackendSession(`pid=${child.pid ?? "unknown"} code=${code ?? "null"} signal=${signal ?? "null"}`);
     if (isQuitting) return;
-    const reason = `code=${code ?? "null"} signal=${signal ?? "null"}`;
-    scheduleBackendRestart(reason);
+    scheduleBackendRestart(`code=${code ?? "null"} signal=${signal ?? "null"}`);
   });
 }
 
@@ -885,7 +511,7 @@ function stopBackend(): void {
       if (child.exitCode === null && child.signalCode === null) {
         child.kill("SIGKILL");
       }
-    }, 2_000).unref();
+    }, 2_000);
   }
 }
 
@@ -898,323 +524,300 @@ async function stopBackendAndWaitForExit(timeoutMs = 5_000): Promise<void> {
   const child = backendProcess;
   backendProcess = null;
   if (!child) return;
-  const backendChild = child;
-  if (backendChild.exitCode !== null || backendChild.signalCode !== null) return;
+  if (child.exitCode !== null || child.signalCode !== null) return;
 
   await new Promise<void>((resolve) => {
     let settled = false;
     let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
     let exitTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
 
-    function settle(): void {
+    const settle = () => {
       if (settled) return;
       settled = true;
-      backendChild.off("exit", onExit);
-      if (forceKillTimer) {
-        clearTimeout(forceKillTimer);
-      }
-      if (exitTimeoutTimer) {
-        clearTimeout(exitTimeoutTimer);
-      }
+      child.off("exit", onExit);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
+      if (exitTimeoutTimer) clearTimeout(exitTimeoutTimer);
       resolve();
-    }
+    };
 
-    function onExit(): void {
-      settle();
-    }
+    const onExit = () => settle();
 
-    backendChild.once("exit", onExit);
-    backendChild.kill("SIGTERM");
+    child.once("exit", onExit);
+    child.kill("SIGTERM");
 
     forceKillTimer = setTimeout(() => {
-      if (backendChild.exitCode === null && backendChild.signalCode === null) {
-        backendChild.kill("SIGKILL");
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
       }
     }, 2_000);
-    forceKillTimer.unref();
 
     exitTimeoutTimer = setTimeout(() => {
       settle();
     }, timeoutMs);
-    exitTimeoutTimer.unref();
   });
 }
 
-function registerIpcHandlers(): void {
-  ipcMain.removeHandler(PICK_FOLDER_CHANNEL);
-  ipcMain.handle(PICK_FOLDER_CHANNEL, async () => {
-    const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
-    const result = owner
-      ? await dialog.showOpenDialog(owner, {
-          properties: ["openDirectory", "createDirectory"],
-        })
-      : await dialog.showOpenDialog({
-          properties: ["openDirectory", "createDirectory"],
-        });
-    if (result.canceled) return null;
-    return result.filePaths[0] ?? null;
-  });
+function actionResult(accepted: boolean, completed: boolean): DesktopUpdateActionResult {
+  return {
+    accepted,
+    completed,
+    state: updateState,
+  } satisfies DesktopUpdateActionResult;
+}
 
-  ipcMain.removeHandler(CONFIRM_CHANNEL);
-  ipcMain.handle(CONFIRM_CHANNEL, async (_event, message: unknown) => {
-    if (typeof message !== "string") {
-      return false;
+async function handleBridgeRequest(envelope: DesktopBridgeRequestEnvelope): Promise<unknown> {
+  switch (envelope.method) {
+    case PICK_FOLDER_METHOD: {
+      const result: unknown = await Utils.openFileDialog({
+        startingFolder:
+          process.platform === "win32"
+            ? resolveWindowsWslHomePathSync() ?? OS.homedir()
+            : OS.homedir(),
+        canChooseFiles: false,
+        canChooseDirectory: true,
+        allowsMultipleSelection: false,
+      });
+      const selected = Array.isArray(result)
+        ? result.find((entry: unknown) => typeof entry === "string" && entry.trim().length > 0)
+        : null;
+      return selected ?? null;
     }
-
-    const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
-    return showDesktopConfirmDialog(message, owner);
-  });
-
-  ipcMain.removeHandler(CONTEXT_MENU_CHANNEL);
-  ipcMain.handle(
-    CONTEXT_MENU_CHANNEL,
-    async (_event, items: ContextMenuItem[], position?: { x: number; y: number }) => {
-      const normalizedItems = items
-        .filter((item) => typeof item.id === "string" && typeof item.label === "string")
-        .map((item) => ({
-          id: item.id,
-          label: item.label,
-          destructive: item.destructive === true,
-        }));
-      if (normalizedItems.length === 0) {
+    case CONFIRM_METHOD: {
+      return showDesktopConfirmDialog(typeof envelope.params === "string" ? envelope.params : "");
+    }
+    case CONTEXT_MENU_METHOD: {
+      const params = envelope.params as
+        | {
+            readonly items?: readonly ContextMenuItem[];
+          }
+        | undefined;
+      const items = Array.isArray(params?.items) ? params.items : [];
+      if (items.length === 0) {
         return null;
       }
 
-      const popupPosition =
-        position &&
-        Number.isFinite(position.x) &&
-        Number.isFinite(position.y) &&
-        position.x >= 0 &&
-        position.y >= 0
-          ? {
-              x: Math.floor(position.x),
-              y: Math.floor(position.y),
+      return await new Promise<string | null>((resolve) => {
+        const timeout = setTimeout(() => {
+          pendingContextMenus.delete(envelope.id);
+          resolve(null);
+        }, 30_000);
+
+        pendingContextMenus.set(envelope.id, { resolve, timeout });
+        ContextMenu.showContextMenu(
+          items.map((item) => {
+            if (item.destructive) {
+              return {
+                label: item.label,
+                action: `context-menu:${envelope.id}`,
+                data: { itemId: item.id },
+                tooltip: "Destructive action",
+              };
             }
-          : null;
-
-      const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
-      if (!window) return null;
-
-      return new Promise<string | null>((resolve) => {
-        const template: MenuItemConstructorOptions[] = [];
-        let hasInsertedDestructiveSeparator = false;
-        for (const item of normalizedItems) {
-          if (item.destructive && !hasInsertedDestructiveSeparator && template.length > 0) {
-            template.push({ type: "separator" });
-            hasInsertedDestructiveSeparator = true;
-          }
-          const itemOption: MenuItemConstructorOptions = {
-            label: item.label,
-            click: () => resolve(item.id),
-          };
-          if (item.destructive) {
-            const destructiveIcon = getDestructiveMenuIcon();
-            if (destructiveIcon) {
-              itemOption.icon = destructiveIcon;
-            }
-          }
-          template.push(itemOption);
-        }
-
-        const menu = Menu.buildFromTemplate(template);
-        menu.popup({
-          window,
-          ...popupPosition,
-          callback: () => resolve(null),
-        });
+            return {
+              label: item.label,
+              action: `context-menu:${envelope.id}`,
+              data: { itemId: item.id },
+            };
+          }),
+        );
       });
+    }
+    case OPEN_EXTERNAL_METHOD: {
+      if (typeof envelope.params !== "string" || envelope.params.length === 0) {
+        return false;
+      }
+
+      try {
+        const parsedUrl = new URL(envelope.params);
+        if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+          return false;
+        }
+        return Utils.openExternal(parsedUrl.toString());
+      } catch {
+        return false;
+      }
+    }
+    case UPDATE_GET_STATE_METHOD: {
+      return updateState;
+    }
+    case UPDATE_DOWNLOAD_METHOD: {
+      const result = await downloadAvailableUpdate();
+      return actionResult(result.accepted, result.completed);
+    }
+    case UPDATE_INSTALL_METHOD: {
+      const result = await installDownloadedUpdate();
+      return actionResult(result.accepted, result.completed);
+    }
+    default:
+      throw new Error(`Unknown desktop bridge method: ${envelope.method}`);
+  }
+}
+
+function configureApplicationMenu(): void {
+  ApplicationMenu.setApplicationMenu([
+    {
+      label: "File",
+      submenu: [
+        { label: "Settings...", action: "open-settings", accelerator: "CmdOrCtrl+," },
+        { type: "separator" },
+        { role: process.platform === "darwin" ? "close" : "quit" },
+      ],
     },
-  );
+    { role: "editMenu" },
+    { role: "viewMenu" },
+    { role: "windowMenu" },
+    {
+      label: "Help",
+      submenu: [{ label: "Check for Updates...", action: "check-for-updates" }],
+    },
+  ]);
 
-  ipcMain.removeHandler(OPEN_EXTERNAL_CHANNEL);
-  ipcMain.handle(OPEN_EXTERNAL_CHANNEL, async (_event, rawUrl: unknown) => {
-    if (typeof rawUrl !== "string" || rawUrl.length === 0) {
-      return false;
+  ApplicationMenu.on("application-menu-clicked", async (event: unknown) => {
+    const data = (event as { data?: { action?: string } }).data;
+    const action = typeof data?.action === "string" ? data.action : "";
+
+    if (action === "check-for-updates") {
+      await checkForUpdates("menu");
+      return;
     }
 
-    let parsedUrl: URL;
-    try {
-      parsedUrl = new URL(rawUrl);
-    } catch {
-      return false;
+    if (action.length > 0) {
+      broadcastBridgeEvent(MENU_ACTION_EVENT, action);
+      if (mainWindow) {
+        mainWindow.focus();
+      }
     }
-
-    if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
-      return false;
-    }
-
-    try {
-      await shell.openExternal(parsedUrl.toString());
-      return true;
-    } catch {
-      return false;
-    }
-  });
-
-  ipcMain.removeHandler(UPDATE_GET_STATE_CHANNEL);
-  ipcMain.handle(UPDATE_GET_STATE_CHANNEL, async () => updateState);
-
-  ipcMain.removeHandler(UPDATE_DOWNLOAD_CHANNEL);
-  ipcMain.handle(UPDATE_DOWNLOAD_CHANNEL, async () => {
-    const result = await downloadAvailableUpdate();
-    return {
-      accepted: result.accepted,
-      completed: result.completed,
-      state: updateState,
-    } satisfies DesktopUpdateActionResult;
-  });
-
-  ipcMain.removeHandler(UPDATE_INSTALL_CHANNEL);
-  ipcMain.handle(UPDATE_INSTALL_CHANNEL, async () => {
-    if (isQuitting) {
-      return {
-        accepted: false,
-        completed: false,
-        state: updateState,
-      } satisfies DesktopUpdateActionResult;
-    }
-    const result = await installDownloadedUpdate();
-    return {
-      accepted: result.accepted,
-      completed: result.completed,
-      state: updateState,
-    } satisfies DesktopUpdateActionResult;
   });
 }
 
-function getIconOption(): { icon: string } | Record<string, never> {
-  if (process.platform === "darwin") return {}; // macOS uses .icns from app bundle
-  const ext = process.platform === "win32" ? "ico" : "png";
-  const iconPath = resolveIconPath(ext);
-  return iconPath ? { icon: iconPath } : {};
+function configureContextMenuListener(): void {
+  ContextMenu.on("context-menu-clicked", (event: unknown) => {
+    const data = (event as { data?: { action?: string; data?: { itemId?: unknown } } }).data;
+    const action = typeof data?.action === "string" ? data.action : "";
+    if (!action.startsWith("context-menu:")) {
+      return;
+    }
+
+    const requestId = action.slice("context-menu:".length);
+    const pending = pendingContextMenus.get(requestId);
+    if (!pending) {
+      return;
+    }
+
+    pendingContextMenus.delete(requestId);
+    clearTimeout(pending.timeout);
+    const itemId = data?.data?.itemId;
+    pending.resolve(typeof itemId === "string" ? itemId : null);
+  });
 }
 
-function createWindow(): BrowserWindow {
+function createWindow(): DesktopWindow {
   const window = new BrowserWindow({
-    width: 1100,
-    height: 780,
-    minWidth: 840,
-    minHeight: 620,
-    show: false,
-    autoHideMenuBar: true,
-    ...getIconOption(),
     title: APP_DISPLAY_NAME,
-    titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 16, y: 18 },
-    webPreferences: {
-      preload: Path.join(__dirname, "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
+    frame: {
+      x: 60,
+      y: 60,
+      width: 1100,
+      height: 780,
     },
+    renderer: "native",
+    preload: resolvePreloadPath(),
+    titleBarStyle: "hiddenInset",
+    url: resolveWindowUrl(),
+    sandbox: false,
   });
 
-  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  window.on("page-title-updated", (event) => {
-    event.preventDefault();
-    window.setTitle(APP_DISPLAY_NAME);
-  });
-  window.webContents.on("did-finish-load", () => {
+  window.webview.on("dom-ready", () => {
     window.setTitle(APP_DISPLAY_NAME);
     emitUpdateState();
   });
-  window.once("ready-to-show", () => {
-    window.show();
-  });
+
+  window.webview.rpcHandler = (message: unknown) => {
+    const envelope = message as Partial<DesktopBridgeRequestEnvelope>;
+    if (envelope.kind !== "request" || typeof envelope.id !== "string" || typeof envelope.method !== "string") {
+      return;
+    }
+
+    void handleBridgeRequest(envelope as DesktopBridgeRequestEnvelope)
+      .then((result) => {
+        sendBridgeMessage(createResponse(envelope.id!, { ok: true, result }));
+      })
+      .catch((error) => {
+        sendBridgeMessage(
+          createResponse(envelope.id!, { ok: false, error: formatErrorMessage(error) }),
+        );
+      });
+  };
 
   if (isDevelopment) {
-    void window.loadURL(process.env.VITE_DEV_SERVER_URL as string);
-    window.webContents.openDevTools({ mode: "detach" });
-  } else {
-    void window.loadURL(`${DESKTOP_SCHEME}://app/index.html`);
+    window.webview.openDevTools();
   }
-
-  window.on("closed", () => {
-    if (mainWindow === window) {
-      mainWindow = null;
-    }
-  });
 
   return window;
 }
 
-configureAppIdentity();
-
 async function bootstrap(): Promise<void> {
-  writeDesktopLogHeader("bootstrap start");
+  writeDesktopLog("bootstrap start");
   backendPort = await Effect.service(NetService).pipe(
     Effect.flatMap((net) => net.reserveLoopbackPort()),
     Effect.provide(NetService.layer),
     Effect.runPromise,
   );
-  writeDesktopLogHeader(`reserved backend port via NetService port=${backendPort}`);
   backendAuthToken = Crypto.randomBytes(24).toString("hex");
   backendWsUrl = `ws://127.0.0.1:${backendPort}/?token=${encodeURIComponent(backendAuthToken)}`;
-  process.env.T3CODE_DESKTOP_WS_URL = backendWsUrl;
-  writeDesktopLogHeader(`bootstrap resolved websocket url=${backendWsUrl}`);
+  writeDesktopLog(`bootstrap resolved websocket url=${backendWsUrl}`);
 
-  registerIpcHandlers();
-  writeDesktopLogHeader("bootstrap ipc handlers registered");
   startBackend();
-  writeDesktopLogHeader("bootstrap backend start requested");
   mainWindow = createWindow();
-  writeDesktopLogHeader("bootstrap main window created");
 }
 
-app.on("before-quit", () => {
-  isQuitting = true;
-  writeDesktopLogHeader("before-quit received");
-  clearUpdatePollTimer();
-  stopBackend();
-  restoreStdIoCapture?.();
-});
-
-app
-  .whenReady()
-  .then(() => {
-    writeDesktopLogHeader("app ready");
-    configureAppIdentity();
-    configureApplicationMenu();
-    registerDesktopProtocol();
-    configureAutoUpdater();
-    void bootstrap().catch((error) => {
-      handleFatalStartupError("bootstrap", error);
-    });
-
-    app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) {
-        mainWindow = createWindow();
-      }
-    });
-  })
-  .catch((error) => {
-    handleFatalStartupError("whenReady", error);
+function registerLifecycleHandlers(): void {
+  Electrobun.events.on("before-quit", () => {
+    isQuitting = true;
+    clearUpdateTimers();
+    stopBackend();
   });
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
-});
+  Electrobun.events.on("close", (event: unknown) => {
+    const closedId = (event as { data?: { id?: number } }).data?.id;
+    if (mainWindow && closedId === mainWindow.id) {
+      mainWindow = null;
+    }
+  });
 
-if (process.platform !== "win32") {
   process.on("SIGINT", () => {
     if (isQuitting) return;
     isQuitting = true;
-    writeDesktopLogHeader("SIGINT received");
-    clearUpdatePollTimer();
+    clearUpdateTimers();
     stopBackend();
-    restoreStdIoCapture?.();
-    app.quit();
+    Utils.quit();
   });
 
   process.on("SIGTERM", () => {
     if (isQuitting) return;
     isQuitting = true;
-    writeDesktopLogHeader("SIGTERM received");
-    clearUpdatePollTimer();
+    clearUpdateTimers();
     stopBackend();
-    restoreStdIoCapture?.();
-    app.quit();
+    Utils.quit();
   });
 }
+
+initializeLogging();
+
+const autoUpdatesEnabled = await resolveAutoUpdateEnabled();
+updateState = {
+  ...createInitialDesktopUpdateState(desktopPackageJson.version),
+  enabled: autoUpdatesEnabled,
+  status: autoUpdatesEnabled ? "idle" : "disabled",
+};
+
+configureApplicationMenu();
+configureContextMenuListener();
+registerLifecycleHandlers();
+configureAutoUpdater();
+
+void bootstrap().catch((error) => {
+  console.error("[desktop] fatal startup error", error);
+  stopBackend();
+  Utils.quit();
+});
