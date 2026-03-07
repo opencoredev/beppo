@@ -3,6 +3,7 @@
 import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { promisify } from "node:util";
+import * as OS from "node:os";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -24,6 +25,24 @@ const LINUX_DESKTOP_DEPENDENCIES = [
   {
     aptPackage: "libayatana-appindicator3-1",
     library: "libayatana-appindicator3.so.1",
+  },
+] as const;
+const LINUX_WSL_CEF_DEPENDENCIES = [
+  {
+    aptPackage: "libnspr4",
+    library: "libnspr4.so",
+  },
+  {
+    aptPackage: "libnss3",
+    library: "libnss3.so",
+  },
+  {
+    aptPackage: "libnss3",
+    library: "libnssutil3.so",
+  },
+  {
+    aptPackage: "libnss3",
+    library: "libsmime3.so",
   },
 ] as const;
 const execFileAsync = promisify(execFile);
@@ -65,7 +84,13 @@ function ensureLinuxDesktopDependencies(mode: DevMode): Effect.Effect<void, DevR
   return Effect.tryPromise({
     try: async () => {
       const { stdout } = await execFileAsync("ldconfig", ["-p"]);
-      const missing = LINUX_DESKTOP_DEPENDENCIES.filter(
+      const isWsl =
+        Boolean(process.env.WSL_DISTRO_NAME) ||
+        OS.release().toLowerCase().includes("microsoft");
+      const requiredDependencies = isWsl
+        ? [...LINUX_DESKTOP_DEPENDENCIES, ...LINUX_WSL_CEF_DEPENDENCIES]
+        : LINUX_DESKTOP_DEPENDENCIES;
+      const missing = requiredDependencies.filter(
         ({ library }) => !stdout.includes(library),
       );
       if (missing.length === 0) {
@@ -76,7 +101,7 @@ function ensureLinuxDesktopDependencies(mode: DevMode): Effect.Effect<void, DevR
         [
           "Desktop dev on Linux requires native Electrobun runtime libraries before it can boot.",
           `Missing shared libraries: ${missing.map(({ library }) => library).join(", ")}.`,
-          `Install them with: sudo apt install ${missing.map(({ aptPackage }) => aptPackage).join(" ")}`,
+          `Install them with: sudo apt install ${[...new Set(missing.map(({ aptPackage }) => aptPackage))].join(" ")}`,
         ].join(" "),
       );
     },
