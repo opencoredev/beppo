@@ -23,6 +23,10 @@
     "./wsl": {
       "types": "./src/wsl.ts",
       "import": "./src/wsl.ts"
+    },
+    "./archive": {
+      "types": "./src/archive.ts",
+      "import": "./src/archive.ts"
     }
   },
   "scripts": {

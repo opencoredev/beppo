@@ -9,6 +9,7 @@ import {
   Trash2Icon,
   XIcon,
 } from "lucide-react";
+import { ARCHIVE_RETENTION_DAYS } from "@t3tools/shared/archive";
 
 import { isElectron } from "../env";
 import { useComposerDraftStore } from "../composerDraftStore";
@@ -37,7 +38,6 @@ import {
 import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
 import { toastManager } from "../components/ui/toast";
 import {
-  ARCHIVE_RETENTION_DAYS,
   archiveDeleteAtIso,
   deleteThreadCommand,
   formatCalendarDateTime,
@@ -260,40 +260,42 @@ function ArchiveRouteView() {
       }
 
       setPendingAction({ kind: "restore", ids: threadIds });
-      const restoredIds: ArchivedThreadId[] = [];
-      let failedCount = 0;
+      try {
+        const restoredIds: ArchivedThreadId[] = [];
+        let failedCount = 0;
 
-      for (const threadId of threadIds) {
-        try {
-          await restoreThreadCommand(api, threadId);
-          restoredIds.push(threadId);
-        } catch {
-          failedCount += 1;
+        for (const threadId of threadIds) {
+          try {
+            await restoreThreadCommand(api, threadId);
+            restoredIds.push(threadId);
+          } catch {
+            failedCount += 1;
+          }
         }
-      }
 
-      if (restoredIds.length > 0) {
-        toastManager.add({
-          type: "success",
-          title:
-            restoredIds.length === 1
-              ? "Thread restored"
-              : `${restoredIds.length} archived chats restored`,
-        });
-        setSelectedThreadIds((current) => removeIds(current, restoredIds));
-      }
+        if (restoredIds.length > 0) {
+          toastManager.add({
+            type: "success",
+            title:
+              restoredIds.length === 1
+                ? "Thread restored"
+                : `${restoredIds.length} archived chats restored`,
+          });
+          setSelectedThreadIds((current) => removeIds(current, restoredIds));
+        }
 
-      if (failedCount > 0) {
-        toastManager.add({
-          type: "error",
-          title:
-            failedCount === 1
-              ? "Failed to restore 1 archived chat"
-              : `Failed to restore ${failedCount} archived chats`,
-        });
+        if (failedCount > 0) {
+          toastManager.add({
+            type: "error",
+            title:
+              failedCount === 1
+                ? "Failed to restore 1 archived chat"
+                : `Failed to restore ${failedCount} archived chats`,
+          });
+        }
+      } finally {
+        setPendingAction(null);
       }
-
-      setPendingAction(null);
     },
     [],
   );
@@ -344,48 +346,51 @@ function ArchiveRouteView() {
     }
 
     setPendingAction({ kind: "delete", ids: deleteDialogThreadIds });
-    const deletedIds: ArchivedThreadId[] = [];
-    let failedCount = 0;
+    try {
+      const deletedIds: ArchivedThreadId[] = [];
+      let failedCount = 0;
 
-    for (const threadId of deleteDialogThreadIds) {
-      const thread = archivedThreadById.get(threadId);
-      if (!thread) {
-        continue;
+      for (const threadId of deleteDialogThreadIds) {
+        const thread = archivedThreadById.get(threadId);
+        if (!thread) {
+          continue;
+        }
+        try {
+          await deleteThreadCommand(api, thread);
+          clearComposerDraftForThread(thread.id);
+          clearProjectDraftThreadById(thread.projectId, thread.id);
+          clearTerminalState(thread.id);
+          deletedIds.push(thread.id);
+        } catch {
+          failedCount += 1;
+        }
       }
-      try {
-        await deleteThreadCommand(api, thread);
-        clearComposerDraftForThread(thread.id);
-        clearProjectDraftThreadById(thread.projectId, thread.id);
-        clearTerminalState(thread.id);
-        deletedIds.push(thread.id);
-      } catch {
-        failedCount += 1;
+
+      if (deletedIds.length > 0) {
+        toastManager.add({
+          type: "success",
+          title:
+            deletedIds.length === 1
+              ? "Archived chat deleted"
+              : `${deletedIds.length} archived chats deleted`,
+        });
+        setSelectedThreadIds((current) => removeIds(current, deletedIds));
       }
-    }
 
-    if (deletedIds.length > 0) {
-      toastManager.add({
-        type: "success",
-        title:
-          deletedIds.length === 1
-            ? "Archived chat deleted"
-            : `${deletedIds.length} archived chats deleted`,
-      });
-      setSelectedThreadIds((current) => removeIds(current, deletedIds));
-    }
+      if (failedCount > 0) {
+        toastManager.add({
+          type: "error",
+          title:
+            failedCount === 1
+              ? "Failed to delete 1 archived chat"
+              : `Failed to delete ${failedCount} archived chats`,
+        });
+      }
 
-    if (failedCount > 0) {
-      toastManager.add({
-        type: "error",
-        title:
-          failedCount === 1
-            ? "Failed to delete 1 archived chat"
-            : `Failed to delete ${failedCount} archived chats`,
-      });
+      setDeleteDialogThreadIds(null);
+    } finally {
+      setPendingAction(null);
     }
-
-    setDeleteDialogThreadIds(null);
-    setPendingAction(null);
   }, [
     archivedThreadById,
     clearComposerDraftForThread,

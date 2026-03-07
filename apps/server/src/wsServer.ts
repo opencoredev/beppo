@@ -27,6 +27,7 @@ import {
   WsPush,
   WsResponse,
 } from "@t3tools/contracts";
+import { ARCHIVED_THREAD_RETENTION_MS } from "@t3tools/shared/archive";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import {
   Cause,
@@ -73,7 +74,6 @@ import {
 import { parseBase64DataUrl } from "./imageMime.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 
-const ARCHIVED_THREAD_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const ARCHIVED_THREAD_PURGE_INTERVAL_MS = 10 * 60 * 1000;
 
 /**

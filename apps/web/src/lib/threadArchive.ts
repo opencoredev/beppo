@@ -1,12 +1,11 @@
 import type { NativeApi, ThreadId } from "@t3tools/contracts";
+import { ARCHIVED_THREAD_RETENTION_MS } from "@t3tools/shared/archive";
 
 import { type Thread } from "../types";
 import { newCommandId } from "./utils";
 
-export const ARCHIVE_RETENTION_DAYS = 30;
-
 export function archiveDeleteAtIso(archivedAt: string): string {
-  return new Date(Date.parse(archivedAt) + ARCHIVE_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  return new Date(Date.parse(archivedAt) + ARCHIVED_THREAD_RETENTION_MS).toISOString();
 }
 
 export function formatCalendarDateTime(iso: string): string {

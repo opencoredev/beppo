@@ -6,6 +6,6 @@ export default Effect.gen(function* () {
 
   yield* sql`
     ALTER TABLE projection_threads
-    ADD COLUMN archived_at TEXT
+    ADD COLUMN archived_at TEXT DEFAULT NULL
   `;
 });
