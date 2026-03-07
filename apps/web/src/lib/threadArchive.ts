@@ -1,12 +1,9 @@
 import type { NativeApi, ThreadId } from "@t3tools/contracts";
-import { ARCHIVED_THREAD_RETENTION_MS } from "@t3tools/shared/archive";
 
 import { type Thread } from "../types";
 import { newCommandId } from "./utils";
 
-export function archiveDeleteAtIso(archivedAt: string): string {
-  return new Date(Date.parse(archivedAt) + ARCHIVED_THREAD_RETENTION_MS).toISOString();
-}
+export { archiveDeleteAtIso } from "@t3tools/shared/archive";
 
 export function formatCalendarDateTime(iso: string): string {
   const parsed = Date.parse(iso);
