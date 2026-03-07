@@ -735,9 +735,17 @@ export default function Sidebar() {
       }
 
       await archiveThreadCommand(api, thread);
+      clearComposerDraftForThread(thread.id);
+      clearProjectDraftThreadById(thread.projectId, thread.id);
+      clearTerminalState(thread.id);
       navigateToThreadFallback(thread.id);
     },
-    [navigateToThreadFallback],
+    [
+      clearComposerDraftForThread,
+      clearProjectDraftThreadById,
+      clearTerminalState,
+      navigateToThreadFallback,
+    ],
   );
 
   const restoreThread = useCallback(async (thread: Thread) => {
@@ -823,13 +831,21 @@ export default function Sidebar() {
         return;
       }
       if (clicked === "restore") {
-        await restoreThread(thread).catch((error) => {
-          toastManager.add({
-            type: "error",
-            title: "Failed to restore thread",
-            description: error instanceof Error ? error.message : "An error occurred.",
+        await restoreThread(thread)
+          .then(() => {
+            toastManager.add({
+              type: "success",
+              title: "Thread restored",
+              description: `"${thread.title}" moved back to the sidebar.`,
+            });
+          })
+          .catch((error) => {
+            toastManager.add({
+              type: "error",
+              title: "Failed to restore thread",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            });
           });
-        });
         return;
       }
       if (clicked === "delete-archived") {

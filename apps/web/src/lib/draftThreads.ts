@@ -107,8 +107,9 @@ export function preferredProjectIdForNewThread(input: {
   threads: Thread[];
 }): ProjectId | null {
   const { projects, threads } = input;
+  const activeThreads = threads.filter((thread) => thread.archivedAt === null);
   const mostRecentlyActiveThread = threads
-    .filter((thread) => thread.latestTurn?.requestedAt)
+    .filter((thread) => thread.archivedAt === null && thread.latestTurn?.requestedAt)
     .toSorted((a, b) => {
       const byRequestedAt =
         Date.parse(b.latestTurn?.requestedAt ?? "") - Date.parse(a.latestTurn?.requestedAt ?? "");
@@ -126,7 +127,7 @@ export function preferredProjectIdForNewThread(input: {
     return mostRecentlyActiveThread.projectId;
   }
 
-  const mostRecentlyCreatedThread = threads.toSorted((a, b) => {
+  const mostRecentlyCreatedThread = activeThreads.toSorted((a, b) => {
     const byCreatedAt = Date.parse(b.createdAt) - Date.parse(a.createdAt);
     if (byCreatedAt !== 0 && !Number.isNaN(byCreatedAt)) {
       return byCreatedAt;
