@@ -17,6 +17,14 @@ describe("wsl helpers", () => {
     });
   });
 
+  it("parses legacy WSL UNC workspace paths", () => {
+    expect(parseWslPath("\\\\wsl$\\Ubuntu\\home\\leo\\code")).toEqual({
+      distro: "Ubuntu",
+      linuxPath: "/home/leo/code",
+      uncPath: "\\\\wsl.localhost\\Ubuntu\\home\\leo\\code",
+    });
+  });
+
   it("maps Linux paths to the default distro when provided", () => {
     expect(parseWslPath("/home/leo/code", { defaultDistro: "Ubuntu" })).toEqual({
       distro: "Ubuntu",

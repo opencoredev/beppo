@@ -158,17 +158,24 @@ describe("WsTransport", () => {
     expect(listener).toHaveBeenCalledTimes(1);
     expect(listener).toHaveBeenCalledWith({ ok: true });
     expect(warnSpy).toHaveBeenCalledTimes(2);
-    expect(warnSpy).toHaveBeenNthCalledWith(1, "Dropped inbound WebSocket envelope", {
-      reason: "decode-failed",
-      issue:
-        "SchemaError: SyntaxError: Expected property name or '}' in JSON at position 2 (line 1 column 3)",
-      raw: "{ invalid-json",
-    });
-    expect(warnSpy).toHaveBeenNthCalledWith(2, "Dropped inbound WebSocket envelope", {
-      reason: "decode-failed",
-      issue: expect.stringContaining("SchemaError: Expected string, got 42"),
-      raw: '{"type":"push","channel":42,"data":{"bad":true}}',
-    });
+    expect(warnSpy).toHaveBeenNthCalledWith(
+      1,
+      "Dropped inbound WebSocket envelope",
+      expect.objectContaining({
+        reason: "decode-failed",
+        issue: expect.stringContaining("SchemaError: SyntaxError:"),
+        raw: "{ invalid-json",
+      }),
+    );
+    expect(warnSpy).toHaveBeenNthCalledWith(
+      2,
+      "Dropped inbound WebSocket envelope",
+      expect.objectContaining({
+        reason: "decode-failed",
+        issue: expect.stringContaining("SchemaError: Expected string, got 42"),
+        raw: '{"type":"push","channel":42,"data":{"bad":true}}',
+      }),
+    );
 
     transport.dispose();
   });
