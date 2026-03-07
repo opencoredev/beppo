@@ -9,6 +9,7 @@
 import { Effect, Layer, Option, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { GitCommandError } from "../Errors.ts";
+import { buildWslProcessCommand } from "../../wsl.ts";
 import {
   ExecuteGitInput,
   ExecuteGitResult,
@@ -77,13 +78,23 @@ const makeGitService = Effect.gen(function* () {
     } as const;
     const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const maxOutputBytes = input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+    const wslCommand = buildWslProcessCommand({
+      command: "git",
+      args: commandInput.args,
+      cwd: commandInput.cwd,
+      ...(input.env ? { env: input.env } : {}),
+    });
 
     const commandEffect = Effect.gen(function* () {
       const child = yield* commandSpawner
         .spawn(
-          ChildProcess.make("git", commandInput.args, {
-            cwd: commandInput.cwd,
-            ...(input.env ? { env: input.env } : {}),
+          ChildProcess.make(wslCommand?.command ?? "git", wslCommand?.args ?? commandInput.args, {
+            cwd: wslCommand?.cwd ?? commandInput.cwd,
+            ...(wslCommand?.env
+              ? { env: wslCommand.env }
+              : input.env
+                ? { env: input.env }
+                : {}),
           }),
         )
         .pipe(Effect.mapError(toGitCommandError(commandInput, "failed to spawn.")));
