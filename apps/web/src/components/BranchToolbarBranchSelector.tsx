@@ -30,7 +30,7 @@ import {
   ComboboxPopup,
   ComboboxTrigger,
 } from "./ui/combobox";
-import { toastManager } from "./ui/toast";
+import { normalizeErrorToastText, shortenToastText, toastManager } from "./ui/toast";
 
 interface BranchToolbarBranchSelectorProps {
   activeProjectCwd: string;
@@ -43,8 +43,17 @@ interface BranchToolbarBranchSelectorProps {
   onComposerFocusRequest?: () => void;
 }
 
-function toBranchActionErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "An error occurred.";
+function showCopyableBranchErrorToast(input: { title: string; error: unknown }) {
+  const fullText = normalizeErrorToastText(input.error, "An error occurred.");
+  toastManager.add({
+    type: "error",
+    title: input.title,
+    description: shortenToastText(fullText),
+    data: {
+      copyText: fullText,
+      copyLabel: "Copy",
+    },
+  });
 }
 
 function getBranchTriggerLabel(input: {
@@ -164,10 +173,9 @@ export function BranchToolbarBranchSelector({
         await api.git.checkout({ cwd: branchCwd, branch: branch.name });
         await invalidateGitQueries(queryClient);
       } catch (error) {
-        toastManager.add({
-          type: "error",
+        showCopyableBranchErrorToast({
           title: "Failed to checkout branch.",
-          description: toBranchActionErrorMessage(error),
+          error,
         });
         return;
       }
@@ -201,18 +209,16 @@ export function BranchToolbarBranchSelector({
         try {
           await api.git.checkout({ cwd: branchCwd, branch: name });
         } catch (error) {
-          toastManager.add({
-            type: "error",
+          showCopyableBranchErrorToast({
             title: "Failed to checkout branch.",
-            description: toBranchActionErrorMessage(error),
+            error,
           });
           return;
         }
       } catch (error) {
-        toastManager.add({
-          type: "error",
+        showCopyableBranchErrorToast({
           title: "Failed to create branch.",
-          description: toBranchActionErrorMessage(error),
+          error,
         });
         return;
       }

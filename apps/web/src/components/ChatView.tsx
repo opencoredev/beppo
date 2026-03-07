@@ -52,7 +52,8 @@ import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
 
 import { isElectron } from "../env";
-import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
+import { APP_BASE_NAME } from "../branding";
+import { parseDiffRouteSearch } from "../diffRouteSearch";
 import {
   type ComposerSlashCommand,
   type ComposerTrigger,
@@ -101,6 +102,7 @@ import {
   DEFAULT_THREAD_TERMINAL_ID,
   MAX_THREAD_TERMINAL_COUNT,
   type ChatMessage,
+  type Project,
   type Thread,
   type TurnDiffFileChange,
   type TurnDiffSummary,
@@ -141,8 +143,10 @@ import {
   CopyIcon,
   CheckIcon,
   ZapIcon,
+  SparklesIcon,
 } from "lucide-react";
 import { Button } from "./ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
 import { Separator } from "./ui/separator";
 import { Group, GroupSeparator } from "./ui/group";
@@ -217,6 +221,7 @@ import { selectThreadTerminalState, useTerminalStateStore } from "../terminalSta
 import { clamp } from "effect/Number";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { estimateTimelineMessageHeight } from "./timelineHeight";
+import beppoSidebarLogo from "../../../../full-logo.png";
 
 function formatMessageMeta(createdAt: string, duration: string | null): string {
   if (!duration) return formatTimestamp(createdAt);
@@ -331,6 +336,7 @@ function buildLocalDraftThread(
     messages: [],
     error,
     createdAt: draftThread.createdAt,
+    archivedAt: null,
     latestTurn: null,
     lastVisitedAt: draftThread.createdAt,
     branch: draftThread.branch,
@@ -372,6 +378,110 @@ function collectUserMessageBlobPreviewUrls(message: ChatMessage): string[] {
   }
   return previewUrls;
 }
+
+const DraftThreadIntro = memo(function DraftThreadIntro({
+  draftSurface,
+  activeProject,
+  activeThread,
+}: {
+  draftSurface: "global" | "project";
+  activeProject: Project | undefined;
+  activeThread: Thread;
+}) {
+  const primaryPath = activeThread.worktreePath ?? activeProject?.cwd ?? null;
+  const primaryPathLabel = primaryPath ? basenameOfPath(primaryPath) || primaryPath : null;
+  const introBadgeLabel =
+    draftSurface === "global" ? `${APP_BASE_NAME} draft` : "Project draft";
+  const introTitle =
+    draftSurface === "global" ? "New thread" : (activeProject?.name ?? "Project thread");
+  const introDescription =
+    draftSurface === "global"
+      ? `Starting in ${activeProject?.name ?? "your last active project"} by default. Send the first message when you're ready.`
+      : `This draft is scoped to ${activeProject?.name ?? "the selected project"} so the first prompt starts in the right folder and context.`;
+
+  return (
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 pb-3">
+      <Card className="overflow-hidden border-border/70 bg-card/90">
+        <CardHeader className="gap-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex min-w-0 items-start gap-4">
+              <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl border border-border/70 bg-background/80 p-2">
+                {draftSurface === "global" ? (
+                  <img
+                    src={beppoSidebarLogo}
+                    alt={APP_BASE_NAME}
+                    className="h-12 w-auto object-contain"
+                  />
+                ) : (
+                  <FolderIcon className="size-6 text-primary" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={draftSurface === "global" ? "secondary" : "outline"}>
+                    {introBadgeLabel}
+                  </Badge>
+                  {activeThread.worktreePath ? <Badge variant="secondary">Worktree</Badge> : null}
+                  {activeThread.branch ? (
+                    <Badge variant="outline">{activeThread.branch}</Badge>
+                  ) : null}
+                </div>
+                <CardTitle className="mt-3 text-2xl tracking-tight">{introTitle}</CardTitle>
+                <CardDescription className="mt-2 max-w-2xl leading-relaxed">
+                  {introDescription}
+                </CardDescription>
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2 rounded-full border border-border/70 bg-background/70 px-3 py-1.5 text-xs text-muted-foreground">
+              <SparklesIcon className="size-3.5 text-primary" />
+              <span>{activeThread.model}</span>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-3 pt-0 md:grid-cols-3">
+          <div className="rounded-2xl border border-border/70 bg-background/70 px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              Project
+            </p>
+            <p className="mt-2 truncate text-sm font-medium text-foreground">
+              {activeProject?.name ?? "Unknown project"}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-border/70 bg-background/70 px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              Folder
+            </p>
+            <p
+              className="mt-2 truncate text-sm font-medium text-foreground"
+              title={primaryPath ?? undefined}
+            >
+              {primaryPathLabel ?? "Project root"}
+            </p>
+            {primaryPath ? (
+              <p className="mt-1 truncate text-xs text-muted-foreground" title={primaryPath}>
+                {primaryPath}
+              </p>
+            ) : null}
+          </div>
+          <div className="rounded-2xl border border-border/70 bg-background/70 px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              Mode
+            </p>
+            <p className="mt-2 text-sm font-medium text-foreground">
+              {activeThread.worktreePath ? "Worktree draft" : "Local draft"}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {activeThread.interactionMode === "plan" ? "Plan mode" : "Default mode"} •{" "}
+              {activeThread.runtimeMode === "approval-required"
+                ? "Approval required"
+                : "Full access"}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+});
 
 type ComposerCommandItem =
   | {
@@ -563,9 +673,10 @@ const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
 
 interface ChatViewProps {
   threadId: ThreadId;
+  draftSurface?: "global" | "project";
 }
 
-export default function ChatView({ threadId }: ChatViewProps) {
+export default function ChatView({ threadId, draftSurface }: ChatViewProps) {
   const threads = useStore((store) => store.threads);
   const projects = useStore((store) => store.projects);
   const markThreadVisited = useStore((store) => store.markThreadVisited);
@@ -741,6 +852,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const activeLatestTurn = activeThread?.latestTurn ?? null;
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
   const activeProject = projects.find((p) => p.id === activeThread?.projectId);
+  const resolvedDraftSurface = draftSurface ?? "project";
+
+  useEffect(() => {
+    if (!draftThread || !serverThread) {
+      return;
+    }
+    clearDraftThread(threadId);
+  }, [clearDraftThread, draftThread, serverThread, threadId]);
 
   useEffect(() => {
     if (!activeThread?.id) return;
@@ -1051,6 +1170,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
       deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
     [activeThread?.proposedPlans, timelineMessages, workLogEntries],
   );
+  const showDraftIntro =
+    isLocalDraftThread && timelineEntries.length === 0 && optimisticUserMessages.length === 0;
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
   const turnDiffSummaryByAssistantMessageId = useMemo(() => {
@@ -1282,10 +1403,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       to: "/$threadId",
       params: { threadId },
       replace: true,
-      search: (previous) => {
-        const rest = stripDiffSearchParams(previous);
-        return diffOpen ? rest : { ...rest, diff: "1" };
-      },
+      search: diffOpen ? {} : { diff: "1" },
     });
   }, [diffOpen, navigate, threadId]);
 
@@ -2571,8 +2689,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
         createdAt: messageCreatedAt,
       });
       turnStartSucceeded = true;
-      if (isFirstMessage) {
-        clearDraftThread(threadIdForSend);
+      if (createdServerThreadForLocalDraft) {
+        await navigate({
+          to: "/$threadId",
+          params: { threadId: threadIdForSend },
+          replace: true,
+        });
       }
     })().catch(async (err: unknown) => {
       if (createdServerThreadForLocalDraft && !turnStartSucceeded) {
@@ -3266,12 +3388,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
       void navigate({
         to: "/$threadId",
         params: { threadId },
-        search: (previous) => {
-          const rest = stripDiffSearchParams(previous);
-          return filePath
-            ? { ...rest, diff: "1", diffTurnId: turnId, diffFilePath: filePath }
-            : { ...rest, diff: "1", diffTurnId: turnId };
-        },
+        search: filePath
+          ? { diff: "1", diffTurnId: turnId, diffFilePath: filePath }
+          : { diff: "1", diffTurnId: turnId },
       });
     },
     [navigate, threadId],
@@ -3362,29 +3481,37 @@ export default function ChatView({ threadId }: ChatViewProps) {
         onTouchEnd={onMessagesTouchEnd}
         onTouchCancel={onMessagesTouchEnd}
       >
-        <MessagesTimeline
-          key={activeThread.id}
-          hasMessages={timelineEntries.length > 0}
-          isWorking={isWorking}
-          activeTurnInProgress={!latestTurnSettled}
-          activeTurnStartedAt={activeLatestTurn?.startedAt ?? null}
-          scrollContainer={messagesScrollElement}
-          timelineEntries={timelineEntries}
-          completionDividerBeforeEntryId={completionDividerBeforeEntryId}
-          completionSummary={completionSummary}
-          turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
-          nowIso={nowIso}
-          expandedWorkGroups={expandedWorkGroups}
-          onToggleWorkGroup={onToggleWorkGroup}
-          onOpenTurnDiff={onOpenTurnDiff}
-          revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
-          onRevertUserMessage={onRevertUserMessage}
-          isRevertingCheckpoint={isRevertingCheckpoint}
-          onImageExpand={onExpandTimelineImage}
-          markdownCwd={gitCwd ?? undefined}
-          resolvedTheme={resolvedTheme}
-          workspaceRoot={activeProject?.cwd ?? undefined}
-        />
+        {showDraftIntro ? (
+          <DraftThreadIntro
+            draftSurface={resolvedDraftSurface}
+            activeProject={activeProject}
+            activeThread={activeThread}
+          />
+        ) : (
+          <MessagesTimeline
+            key={activeThread.id}
+            hasMessages={timelineEntries.length > 0}
+            isWorking={isWorking}
+            activeTurnInProgress={!latestTurnSettled}
+            activeTurnStartedAt={activeLatestTurn?.startedAt ?? null}
+            scrollContainer={messagesScrollElement}
+            timelineEntries={timelineEntries}
+            completionDividerBeforeEntryId={completionDividerBeforeEntryId}
+            completionSummary={completionSummary}
+            turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
+            nowIso={nowIso}
+            expandedWorkGroups={expandedWorkGroups}
+            onToggleWorkGroup={onToggleWorkGroup}
+            onOpenTurnDiff={onOpenTurnDiff}
+            revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
+            onRevertUserMessage={onRevertUserMessage}
+            isRevertingCheckpoint={isRevertingCheckpoint}
+            onImageExpand={onExpandTimelineImage}
+            markdownCwd={gitCwd ?? undefined}
+            resolvedTheme={resolvedTheme}
+            workspaceRoot={activeProject?.cwd ?? undefined}
+          />
+        )}
       </div>
 
       {/* Input bar */}

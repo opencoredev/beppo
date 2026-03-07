@@ -42,6 +42,11 @@ const config = {
             chromiumFlags: {
               "disable-gpu": true,
               "disable-gpu-compositing": true,
+              "enable-unsafe-swiftshader": true,
+              "use-angle": "swiftshader",
+              "use-gl": "angle",
+              "enable-features": "UseOzonePlatform",
+              "ozone-platform": "wayland",
             },
           }
         : {}),

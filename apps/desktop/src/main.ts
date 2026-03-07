@@ -726,7 +726,7 @@ function createWindow(): DesktopWindow {
     },
     renderer,
     preload: resolvePreloadPath(),
-    titleBarStyle: "hiddenInset",
+    titleBarStyle: isWslRuntime ? "default" : "hiddenInset",
     url: resolveWindowUrl(),
     sandbox: false,
   });
@@ -753,8 +753,12 @@ function createWindow(): DesktopWindow {
       });
   };
 
-  if (isDevelopment) {
+  if (isDevelopment && !isWslRuntime) {
     window.webview.openDevTools();
+  }
+
+  if (isWslRuntime) {
+    window.focus();
   }
 
   return window;

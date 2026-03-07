@@ -83,6 +83,9 @@
 
 :root {
   color-scheme: light;
+  --sidebar-motion-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --sidebar-motion-open-duration: 300ms;
+  --sidebar-motion-close-duration: 200ms;
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.147 0.004 49.3);
@@ -164,6 +167,13 @@
   --sidebar-border: oklch(0.922 0.005 34.3);
 
   --sidebar-ring: oklch(0.714 0.014 41.2)
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --sidebar-motion-open-duration: 1ms;
+    --sidebar-motion-close-duration: 1ms;
+  }
 }
 
 body {

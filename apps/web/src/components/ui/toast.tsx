@@ -1,12 +1,14 @@
 "use client";
 
 import { Toast } from "@base-ui/react/toast";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "@tanstack/react-router";
 import { ThreadId } from "@t3tools/contracts";
 import {
+  CheckIcon,
   CircleAlertIcon,
   CircleCheckIcon,
+  CopyIcon,
   InfoIcon,
   LoaderCircleIcon,
   TriangleAlertIcon,
@@ -20,6 +22,8 @@ type ThreadToastData = {
   threadId?: ThreadId | null;
   tooltipStyle?: boolean;
   dismissAfterVisibleMs?: number;
+  copyText?: string;
+  copyLabel?: string;
 };
 
 const toastManager = Toast.createToastManager<ThreadToastData>();
@@ -140,6 +144,64 @@ function ThreadToastVisibleAutoDismiss({
   }, [dismissAfterVisibleMs, toastId]);
 
   return null;
+}
+
+function shortenToastText(value: string, maxLength = 140): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 3).trimEnd()}...`;
+}
+
+function normalizeErrorToastText(error: unknown, fallbackDescription: string): string {
+  if (typeof error === "string" && error.trim().length > 0) {
+    return error;
+  }
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+  return fallbackDescription;
+}
+
+function ToastCopyAction({
+  copyText,
+  copyLabel,
+}: {
+  copyText: string;
+  copyLabel?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      setCopied(false);
+    }, 1200);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [copied]);
+
+  return (
+    <button
+      type="button"
+      className={cn(buttonVariants({ size: "xs", variant: "outline" }), "shrink-0")}
+      onClick={() => {
+        void navigator.clipboard
+          .writeText(copyText)
+          .then(() => setCopied(true))
+          .catch(() => undefined);
+      }}
+      title={copied ? "Copied" : (copyLabel ?? "Copy details")}
+      aria-label={copied ? "Copied" : (copyLabel ?? "Copy details")}
+    >
+      {copied ? <CheckIcon data-icon="inline-start" /> : <CopyIcon data-icon="inline-start" />}
+      {copied ? "Copied" : (copyLabel ?? "Copy")}
+    </button>
+  );
 }
 
 function ToastProvider({ children, position = "top-right", ...props }: ToastProviderProps) {
@@ -282,13 +344,23 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
                     />
                   </div>
                 </div>
-                {toast.actionProps && (
-                  <Toast.Action
-                    className={cn(buttonVariants({ size: "xs" }), "shrink-0")}
-                    data-slot="toast-action"
-                  >
-                    {toast.actionProps.children}
-                  </Toast.Action>
+                {(toast.data?.copyText || toast.actionProps) && (
+                  <div className="flex shrink-0 items-center gap-1">
+                    {toast.data?.copyText ? (
+                      <ToastCopyAction
+                        copyText={toast.data.copyText}
+                        {...(toast.data.copyLabel ? { copyLabel: toast.data.copyLabel } : {})}
+                      />
+                    ) : null}
+                    {toast.actionProps ? (
+                      <Toast.Action
+                        className={cn(buttonVariants({ size: "xs" }), "shrink-0")}
+                        data-slot="toast-action"
+                      >
+                        {toast.actionProps.children}
+                      </Toast.Action>
+                    ) : null}
+                  </div>
                 )}
               </Toast.Content>
             </Toast.Root>
@@ -371,13 +443,25 @@ function AnchoredToasts() {
                           />
                         </div>
                       </div>
-                      {toast.actionProps && (
-                        <Toast.Action
-                          className={cn(buttonVariants({ size: "xs" }), "shrink-0")}
-                          data-slot="toast-action"
-                        >
-                          {toast.actionProps.children}
-                        </Toast.Action>
+                      {(toast.data?.copyText || toast.actionProps) && (
+                        <div className="flex shrink-0 items-center gap-1">
+                          {toast.data?.copyText ? (
+                            <ToastCopyAction
+                              copyText={toast.data.copyText}
+                              {...(toast.data.copyLabel
+                                ? { copyLabel: toast.data.copyLabel }
+                                : {})}
+                            />
+                          ) : null}
+                          {toast.actionProps ? (
+                            <Toast.Action
+                              className={cn(buttonVariants({ size: "xs" }), "shrink-0")}
+                              data-slot="toast-action"
+                            >
+                              {toast.actionProps.children}
+                            </Toast.Action>
+                          ) : null}
+                        </div>
                       )}
                     </Toast.Content>
                   )}
@@ -396,4 +480,6 @@ export {
   toastManager,
   AnchoredToastProvider,
   anchoredToastManager,
+  shortenToastText,
+  normalizeErrorToastText,
 };

@@ -73,6 +73,8 @@ import {
 import { parseBase64DataUrl } from "./imageMime.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 
+const ARCHIVED_THREAD_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
 /**
  * ServerShape - Service API for server lifecycle control.
  */
@@ -597,9 +599,34 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
   let welcomeBootstrapProjectId: ProjectId | undefined;
   let welcomeBootstrapThreadId: ThreadId | undefined;
+  const purgeExpiredArchivedThreads = Effect.fnUntraced(function* () {
+    const snapshot = yield* projectionReadModelQuery.getSnapshot();
+    const nowMs = Date.now();
+    const expiredThreadIds = snapshot.threads
+      .filter((thread) => {
+        if (thread.deletedAt !== null || thread.archivedAt === null) {
+          return false;
+        }
+        const archivedAtMs = Date.parse(thread.archivedAt);
+        return Number.isFinite(archivedAtMs) && archivedAtMs + ARCHIVED_THREAD_RETENTION_MS <= nowMs;
+      })
+      .map((thread) => thread.id);
+
+    yield* Effect.forEach(
+      expiredThreadIds,
+      (threadId) =>
+        orchestrationEngine.dispatch({
+          type: "thread.delete",
+          commandId: CommandId.makeUnsafe(crypto.randomUUID()),
+          threadId,
+        }),
+      { concurrency: 1, discard: true },
+    );
+  });
 
   if (autoBootstrapProjectFromCwd) {
     yield* Effect.gen(function* () {
+      yield* purgeExpiredArchivedThreads();
       const snapshot = yield* projectionReadModelQuery.getSnapshot();
       const existingProject = snapshot.projects.find(
         (project) => project.workspaceRoot === cwd && project.deletedAt === null,
@@ -627,7 +654,10 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       }
 
       const existingThread = snapshot.threads.find(
-        (thread) => thread.projectId === bootstrapProjectId && thread.deletedAt === null,
+        (thread) =>
+          thread.projectId === bootstrapProjectId &&
+          thread.deletedAt === null &&
+          thread.archivedAt === null,
       );
       if (!existingThread) {
         const createdAt = new Date().toISOString();
@@ -683,6 +713,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const routeRequest = Effect.fnUntraced(function* (request: WebSocketRequest) {
     switch (request.body._tag) {
       case ORCHESTRATION_WS_METHODS.getSnapshot:
+        yield* purgeExpiredArchivedThreads();
         return yield* projectionReadModelQuery.getSnapshot();
 
       case ORCHESTRATION_WS_METHODS.dispatchCommand: {
