@@ -32,6 +32,7 @@ import { readNativeApi } from "../nativeApi";
 import { type DraftThreadEnvMode, useComposerDraftStore } from "../composerDraftStore";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { toastManager } from "./ui/toast";
+import { Button } from "./ui/button";
 import {
   getDesktopUpdateActionError,
   getDesktopUpdateButtonTooltip,
@@ -42,6 +43,7 @@ import {
   shouldToastDesktopUpdateActionResult,
 } from "./desktopUpdate.logic";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
+import { Input } from "./ui/input";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import {
   SidebarContent,
@@ -60,6 +62,7 @@ import {
 } from "./ui/sidebar";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
+import beppoSidebarLogo from "../../../../full-logo.png";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const THREAD_PREVIEW_LIMIT = 6;
@@ -197,17 +200,6 @@ function prStatusIndicator(pr: ThreadPr): PrStatusIndicator | null {
   return null;
 }
 
-function BeppoWordmark() {
-  return (
-    <span
-      aria-label="Beppo"
-      className="shrink-0 text-sm font-semibold tracking-tight text-foreground"
-    >
-      Beppo
-    </span>
-  );
-}
-
 /**
  * Derives the server's HTTP origin (scheme + host + port) from the same
  * sources WsTransport uses, converting ws(s) to http(s).
@@ -278,6 +270,10 @@ export default function Sidebar() {
     strict: false,
     select: (params) => (params.threadId ? ThreadId.makeUnsafe(params.threadId) : null),
   });
+  const preferredProjectIdForNewThread = useMemo(
+    () => threads.find((thread) => thread.id === routeThreadId)?.projectId ?? projects[0]?.id ?? null,
+    [projects, routeThreadId, threads],
+  );
   const { data: keybindings = EMPTY_KEYBINDINGS } = useQuery({
     ...serverConfigQueryOptions(),
     select: (config) => config.keybindings,
@@ -517,6 +513,15 @@ export default function Sidebar() {
   const handleAddProject = () => {
     void addProjectFromPath(newCwd);
   };
+
+  const handleTopLevelNewThread = useCallback(() => {
+    if (!preferredProjectIdForNewThread) {
+      setAddingProject(true);
+      return;
+    }
+
+    void handleNewThread(preferredProjectIdForNewThread);
+  }, [handleNewThread, preferredProjectIdForNewThread]);
 
   const handlePickFolder = async () => {
     const api = readNativeApi();
@@ -965,51 +970,81 @@ export default function Sidebar() {
   }, []);
 
   const wordmark = (
-    <div className="flex items-center gap-2">
-      <SidebarTrigger className="shrink-0 md:hidden" />
-      <div className="flex min-w-0 flex-1 items-center gap-1 mt-2 ml-1">
-        <BeppoWordmark />
-        <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
-          {APP_STAGE_LABEL}
-        </span>
-      </div>
+    <div className="flex min-w-0 flex-col items-center gap-2 text-center">
+      <img
+        src={beppoSidebarLogo}
+        alt="Beppo"
+        className="h-14 w-auto max-w-[196px] shrink-0 object-contain"
+      />
+      <span className="rounded-full bg-foreground/6 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.28em] text-muted-foreground/70 ring-1 ring-border/70">
+        {APP_STAGE_LABEL}
+      </span>
     </div>
   );
 
   return (
     <>
       {isElectron ? (
-        <>
-          <SidebarHeader className="drag-region h-[52px] flex-row items-center gap-2 px-4 py-0 pl-[82px]">
-            {wordmark}
-            {showDesktopUpdateButton && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      aria-label={desktopUpdateTooltip}
-                      aria-disabled={desktopUpdateButtonDisabled || undefined}
-                      disabled={desktopUpdateButtonDisabled}
-                      className={`inline-flex size-7 ml-auto mt-2 items-center justify-center rounded-md text-muted-foreground transition-colors ${desktopUpdateButtonInteractivityClasses} ${desktopUpdateButtonClasses}`}
-                      onClick={handleDesktopUpdateButtonClick}
-                    >
-                      <RocketIcon className="size-3.5" />
-                    </button>
-                  }
-                />
-                <TooltipPopup side="bottom">{desktopUpdateTooltip}</TooltipPopup>
-              </Tooltip>
-            )}
-          </SidebarHeader>
-        </>
+        <SidebarHeader className="drag-region relative h-[112px] px-4 py-0 pl-[82px]">
+          <SidebarTrigger className="absolute top-4 left-4 shrink-0 md:hidden" />
+          <div className="flex h-full items-center justify-center">{wordmark}</div>
+          {showDesktopUpdateButton && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label={desktopUpdateTooltip}
+                    aria-disabled={desktopUpdateButtonDisabled || undefined}
+                    disabled={desktopUpdateButtonDisabled}
+                    className={`absolute top-4 right-4 inline-flex size-8 items-center justify-center rounded-full border border-border/70 bg-background/75 text-muted-foreground transition-colors ${desktopUpdateButtonInteractivityClasses} ${desktopUpdateButtonClasses}`}
+                    onClick={handleDesktopUpdateButtonClick}
+                  >
+                    <RocketIcon className="size-3.5" />
+                  </button>
+                }
+              />
+              <TooltipPopup side="bottom">{desktopUpdateTooltip}</TooltipPopup>
+            </Tooltip>
+          )}
+        </SidebarHeader>
       ) : (
-        <SidebarHeader className="gap-3 px-3 py-2 sm:gap-2.5 sm:px-4 sm:py-3">
+        <SidebarHeader className="relative flex items-center justify-center px-4 py-5">
+          <SidebarTrigger className="absolute top-4 left-4 shrink-0 md:hidden" />
           {wordmark}
         </SidebarHeader>
       )}
 
       <SidebarContent className="gap-0">
+        <SidebarGroup className="px-3 pt-1 pb-2">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  className="h-11 w-full justify-between rounded-2xl px-4 shadow-sm"
+                  onClick={handleTopLevelNewThread}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <SquarePenIcon data-icon="inline-start" />
+                    New thread
+                  </span>
+                  {newThreadShortcutLabel ? (
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-primary-foreground/70">
+                      {newThreadShortcutLabel}
+                    </span>
+                  ) : null}
+                </Button>
+              }
+            />
+            <TooltipPopup side="bottom">
+              {newThreadShortcutLabel
+                ? `New thread (${newThreadShortcutLabel})`
+                : "Create a new thread"}
+            </TooltipPopup>
+          </Tooltip>
+
+        </SidebarGroup>
+
         <SidebarGroup className="px-2 py-2">
           <SidebarMenu>
             {projects.map((project) => {
@@ -1289,8 +1324,8 @@ export default function Sidebar() {
             <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
               Add project
             </p>
-            <input
-              className="mb-2 w-full rounded-md border border-border bg-secondary px-2 py-1.5 font-mono text-xs text-foreground placeholder:text-muted-foreground/40 focus:border-ring focus:outline-none"
+            <Input
+              className="mb-2 h-9 font-mono text-xs"
               placeholder="/path/to/project"
               value={newCwd}
               onChange={(event) => setNewCwd(event.target.value)}
@@ -1299,42 +1334,37 @@ export default function Sidebar() {
                 if (event.key === "Escape") setAddingProject(false);
               }}
             />
-            {isElectron && (
-              <button
-                type="button"
-                className="mb-2 flex w-full items-center justify-center rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-60"
+            {isElectron ? (
+              <Button
+                variant="outline"
+                className="mb-2 w-full justify-center"
                 onClick={() => void handlePickFolder()}
                 disabled={isPickingFolder || isAddingProject}
               >
                 {isPickingFolder ? "Picking folder..." : "Browse for folder"}
-              </button>
-            )}
+              </Button>
+            ) : null}
             <div className="flex gap-2">
-              <button
-                type="button"
-                className="flex-1 rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground transition-colors duration-150 hover:bg-primary/90"
-                onClick={handleAddProject}
-                disabled={isAddingProject}
-              >
+              <Button className="flex-1" onClick={handleAddProject} disabled={isAddingProject}>
                 {isAddingProject ? "Adding..." : "Add"}
-              </button>
-              <button
-                type="button"
-                className="flex-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground/80 transition-colors duration-150 hover:bg-secondary"
+              </Button>
+              <Button
+                variant="outline"
+                className="flex-1"
                 onClick={() => setAddingProject(false)}
               >
                 Cancel
-              </button>
+              </Button>
             </div>
           </>
         ) : (
-          <button
-            type="button"
-            className="flex w-full items-center justify-center gap-1 rounded-md border border-dashed border-border py-2 text-xs text-muted-foreground/70 transition-colors duration-150 hover:border-ring hover:text-muted-foreground"
+          <Button
+            variant="outline"
+            className="w-full justify-center border-dashed text-muted-foreground"
             onClick={() => setAddingProject(true)}
           >
-            + Add project
-          </button>
+            Add project
+          </Button>
         )}
       </SidebarFooter>
     </>

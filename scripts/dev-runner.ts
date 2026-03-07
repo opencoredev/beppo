@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
+import { execFile } from "node:child_process";
 import { homedir } from "node:os";
+import { promisify } from "node:util";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -13,6 +15,8 @@ const BASE_SERVER_PORT = 3773;
 const BASE_WEB_PORT = 5733;
 const MAX_HASH_OFFSET = 3000;
 const MAX_PORT = 65535;
+const LINUX_WEBKIT_LIBRARY = "libwebkit2gtk-4.1.so.0";
+const execFileAsync = promisify(execFile);
 
 export const DEFAULT_DEV_STATE_DIR = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(homedir(), ".t3", "dev"),
@@ -42,6 +46,37 @@ class DevRunnerError extends Data.TaggedError("DevRunnerError")<{
   readonly message: string;
   readonly cause?: unknown;
 }> {}
+
+function ensureLinuxDesktopDependencies(mode: DevMode): Effect.Effect<void, DevRunnerError> {
+  if (mode !== "dev:desktop" || process.platform !== "linux") {
+    return Effect.void;
+  }
+
+  return Effect.tryPromise({
+    try: async () => {
+      const { stdout } = await execFileAsync("ldconfig", ["-p"]);
+      if (stdout.includes(LINUX_WEBKIT_LIBRARY)) {
+        return;
+      }
+
+      throw new Error(
+        [
+          "Desktop dev on Linux requires WebKitGTK 4.1 before Electrobun can boot.",
+          `Missing shared library: ${LINUX_WEBKIT_LIBRARY}.`,
+          "Install it with: sudo apt install libwebkit2gtk-4.1-0",
+        ].join(" "),
+      );
+    },
+    catch: (cause) =>
+      new DevRunnerError({
+        message:
+          cause instanceof Error
+            ? cause.message
+            : `Desktop dev preflight failed while checking ${LINUX_WEBKIT_LIBRARY}.`,
+        cause,
+      }),
+  });
+}
 
 const optionalStringConfig = (name: string): Config.Config<string | undefined> =>
   Config.string(name).pipe(
@@ -378,6 +413,8 @@ const resolveOptionalBooleanOverride = (
 
 export function runDevRunnerWithInput(input: DevRunnerCliInput) {
   return Effect.gen(function* () {
+    yield* ensureLinuxDesktopDependencies(input.mode);
+
     const { portOffset, devInstance } = yield* OffsetConfig.asEffect().pipe(
       Effect.mapError(
         (cause) =>

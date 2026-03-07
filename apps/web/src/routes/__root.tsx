@@ -1,3 +1,4 @@
+import { CheckIcon, CopyIcon } from "lucide-react";
 import { ThreadId } from "@t3tools/contracts";
 import {
   Outlet,
@@ -6,7 +7,7 @@ import {
   useNavigate,
   useRouterState,
 } from "@tanstack/react-router";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 
 import { APP_DISPLAY_NAME } from "../branding";
@@ -22,6 +23,7 @@ import { terminalRunningSubprocessFromEvent } from "../terminalActivity";
 import { onServerConfigUpdated, onServerWelcome } from "../wsNativeApi";
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
+import beppoAppIcon from "../../../../icon.jpg";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -34,6 +36,28 @@ export const Route = createRootRouteWithContext<{
 });
 
 function RootRouteView() {
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const existingLink = document.querySelector("link[rel='icon']") as HTMLLinkElement | null;
+    const link =
+      existingLink ??
+      Object.assign(document.createElement("link"), {
+        rel: "icon",
+      });
+    const previousHref = existingLink?.href ?? "";
+    link.href = beppoAppIcon;
+    if (!existingLink) {
+      document.head.append(link);
+    }
+
+    return () => {
+      link.href = previousHref;
+      if (!existingLink && previousHref.length === 0) {
+        link.remove();
+      }
+    };
+  }, []);
+
   if (!readNativeApi()) {
     return (
       <div className="flex h-screen flex-col bg-background text-foreground">
@@ -60,6 +84,18 @@ function RootRouteView() {
 function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
   const message = errorMessage(error);
   const details = errorDetails(error);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimerRef.current !== null) {
+        clearTimeout(copyResetTimerRef.current);
+        copyResetTimerRef.current = null;
+      }
+    };
+  }, []);
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
@@ -86,15 +122,45 @@ function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
           </Button>
         </div>
 
-        <details className="group mt-5 overflow-hidden rounded-lg border border-border/70 bg-background/55">
-          <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-muted-foreground">
-            <span className="group-open:hidden">Show error details</span>
-            <span className="hidden group-open:inline">Hide error details</span>
-          </summary>
-          <pre className="max-h-56 overflow-auto border-t border-border/70 bg-background/80 px-3 py-2 text-xs text-foreground/85">
-            {details}
-          </pre>
-        </details>
+        <div className="mt-5 overflow-hidden rounded-lg border border-border/70 bg-background/55">
+          <div className="flex items-center justify-between gap-2 px-3 py-2">
+            <button
+              type="button"
+              className="cursor-pointer text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => setDetailsOpen((open) => !open)}
+            >
+              {detailsOpen ? "Hide error details" : "Show error details"}
+            </button>
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              title={copied ? "Copied" : "Copy error details"}
+              aria-label={copied ? "Copied" : "Copy error details"}
+              onClick={() => {
+                void navigator.clipboard
+                  .writeText(details)
+                  .then(() => {
+                    if (copyResetTimerRef.current !== null) {
+                      clearTimeout(copyResetTimerRef.current);
+                    }
+                    setCopied(true);
+                    copyResetTimerRef.current = setTimeout(() => {
+                      setCopied(false);
+                      copyResetTimerRef.current = null;
+                    }, 1200);
+                  })
+                  .catch(() => undefined);
+              }}
+            >
+              {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
+            </Button>
+          </div>
+          {detailsOpen ? (
+            <pre className="max-h-56 overflow-auto border-t border-border/70 bg-background/80 px-3 py-2 text-xs text-foreground/85">
+              {details}
+            </pre>
+          ) : null}
+        </div>
       </section>
     </div>
   );

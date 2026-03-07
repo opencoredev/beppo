@@ -36,6 +36,8 @@ type SidebarContextProps = {
   toggleSidebar: () => void;
 };
 
+type SidebarToggleShortcut = "/" | "\\";
+
 type SidebarResizableOptions = {
   maxWidth?: number;
   minWidth?: number;
@@ -74,6 +76,20 @@ type SidebarInstanceContextProps = {
 const SidebarContext = React.createContext<SidebarContextProps | null>(null);
 const SidebarInstanceContext = React.createContext<SidebarInstanceContextProps | null>(null);
 
+function matchesSidebarToggleShortcut(
+  event: Pick<
+    KeyboardEvent,
+    "altKey" | "ctrlKey" | "defaultPrevented" | "key" | "metaKey" | "shiftKey"
+  >,
+  shortcutKey: SidebarToggleShortcut,
+): boolean {
+  if (event.defaultPrevented) return false;
+  if (event.altKey || event.shiftKey) return false;
+  const hasSingleModifier = event.metaKey !== event.ctrlKey;
+  if (!hasSingleModifier) return false;
+  return event.key === shortcutKey;
+}
+
 function useSidebar() {
   const context = React.useContext(SidebarContext);
   if (!context) {
@@ -87,6 +103,7 @@ function SidebarProvider({
   defaultOpen = true,
   open: openProp,
   onOpenChange: setOpenProp,
+  toggleShortcutKey,
   className,
   style,
   children,
@@ -95,6 +112,7 @@ function SidebarProvider({
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  toggleShortcutKey?: SidebarToggleShortcut;
 }) {
   const isMobile = useMediaQuery("(max-width: 767px)");
   const [openMobile, setOpenMobile] = React.useState(false);
@@ -144,6 +162,25 @@ function SidebarProvider({
     }),
     [state, open, setOpen, isMobile, openMobile, toggleSidebar],
   );
+
+  React.useEffect(() => {
+    if (toggleShortcutKey === undefined) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!matchesSidebarToggleShortcut(event, toggleShortcutKey)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      toggleSidebar();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [toggleShortcutKey, toggleSidebar]);
 
   return (
     <SidebarContext.Provider value={contextValue}>
@@ -988,4 +1025,5 @@ export {
   SidebarSeparator,
   SidebarTrigger,
   useSidebar,
+  matchesSidebarToggleShortcut,
 };

@@ -110,6 +110,7 @@ const DiffPanelInlineSidebar = (props: {
       defaultOpen={false}
       open={diffOpen}
       onOpenChange={onOpenChange}
+      toggleShortcutKey={"\\"}
       className="w-auto min-h-0 flex-none bg-transparent"
       style={{ "--sidebar-width": DIFF_INLINE_DEFAULT_WIDTH } as React.CSSProperties}
     >
