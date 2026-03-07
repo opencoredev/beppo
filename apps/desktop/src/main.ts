@@ -59,6 +59,9 @@ const LOG_FILE_MAX_FILES = 10;
 const APP_RUN_ID = Crypto.randomBytes(6).toString("hex");
 const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
+const isWslRuntime =
+  Boolean(process.env.WSL_DISTRO_NAME) ||
+  OS.release().toLowerCase().includes("microsoft");
 
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
 
@@ -712,6 +715,7 @@ function configureContextMenuListener(): void {
 }
 
 function createWindow(): DesktopWindow {
+  const renderer = isWslRuntime ? "cef" : "native";
   const window = new BrowserWindow({
     title: APP_DISPLAY_NAME,
     frame: {
@@ -720,9 +724,9 @@ function createWindow(): DesktopWindow {
       width: 1100,
       height: 780,
     },
-    renderer: "native",
+    renderer,
     preload: resolvePreloadPath(),
-    titleBarStyle: "hiddenInset",
+    titleBarStyle: isWslRuntime ? "default" : "hiddenInset",
     url: resolveWindowUrl(),
     sandbox: false,
   });
@@ -749,8 +753,12 @@ function createWindow(): DesktopWindow {
       });
   };
 
-  if (isDevelopment) {
+  if (isDevelopment && !isWslRuntime) {
     window.webview.openDevTools();
+  }
+
+  if (isWslRuntime) {
+    window.focus();
   }
 
   return window;

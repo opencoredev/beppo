@@ -3,12 +3,12 @@
   "version": "0.0.3",
   "private": true,
   "scripts": {
-    "dev": "electrobun dev --watch",
-    "build": "electrobun build",
-    "start": "electrobun run",
-    "package": "electrobun build stable",
+    "dev": "bunx --bun electrobun dev --watch",
+    "build": "bunx --bun electrobun build",
+    "start": "bunx --bun electrobun run",
+    "package": "bunx --bun electrobun build stable",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests",
+    "test": "bunx --bun vitest run --passWithNoTests",
     "smoke-test": "node scripts/smoke-test.mjs"
   },
   "dependencies": {

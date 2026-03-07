@@ -1,9 +1,11 @@
+import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import { defineConfig } from "vite";
 
 const port = Number(process.env.PORT ?? 5733);
+const srcPath = fileURLToPath(new URL("./src", import.meta.url));
 
 export default defineConfig({
   plugins: [
@@ -26,6 +28,9 @@ export default defineConfig({
     enableNativePlugin: true,
   },
   resolve: {
+    alias: {
+      "~": srcPath,
+    },
     tsconfigPaths: true,
   },
   server: {

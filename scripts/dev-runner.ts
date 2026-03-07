@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
+import { execFile } from "node:child_process";
 import { homedir } from "node:os";
+import { promisify } from "node:util";
+import * as OS from "node:os";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -13,6 +16,36 @@ const BASE_SERVER_PORT = 3773;
 const BASE_WEB_PORT = 5733;
 const MAX_HASH_OFFSET = 3000;
 const MAX_PORT = 65535;
+const TURBO_COMMAND = typeof Bun !== "undefined" ? process.execPath : "bun";
+const LINUX_DESKTOP_DEPENDENCIES = [
+  {
+    aptPackage: "libwebkit2gtk-4.1-0",
+    library: "libwebkit2gtk-4.1.so.0",
+  },
+  {
+    aptPackage: "libayatana-appindicator3-1",
+    library: "libayatana-appindicator3.so.1",
+  },
+] as const;
+const LINUX_WSL_CEF_DEPENDENCIES = [
+  {
+    aptPackage: "libnspr4",
+    library: "libnspr4.so",
+  },
+  {
+    aptPackage: "libnss3",
+    library: "libnss3.so",
+  },
+  {
+    aptPackage: "libnss3",
+    library: "libnssutil3.so",
+  },
+  {
+    aptPackage: "libnss3",
+    library: "libsmime3.so",
+  },
+] as const;
+const execFileAsync = promisify(execFile);
 
 export const DEFAULT_DEV_STATE_DIR = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(homedir(), ".t3", "dev"),
@@ -42,6 +75,46 @@ class DevRunnerError extends Data.TaggedError("DevRunnerError")<{
   readonly message: string;
   readonly cause?: unknown;
 }> {}
+
+function ensureLinuxDesktopDependencies(mode: DevMode): Effect.Effect<void, DevRunnerError> {
+  if (mode !== "dev:desktop" || process.platform !== "linux") {
+    return Effect.void;
+  }
+
+  return Effect.tryPromise({
+    try: async () => {
+      const { stdout } = await execFileAsync("ldconfig", ["-p"]);
+      const isWsl =
+        Boolean(process.env.WSL_DISTRO_NAME) ||
+        OS.release().toLowerCase().includes("microsoft");
+      const requiredDependencies = isWsl
+        ? [...LINUX_DESKTOP_DEPENDENCIES, ...LINUX_WSL_CEF_DEPENDENCIES]
+        : LINUX_DESKTOP_DEPENDENCIES;
+      const missing = requiredDependencies.filter(
+        ({ library }) => !stdout.includes(library),
+      );
+      if (missing.length === 0) {
+        return;
+      }
+
+      throw new Error(
+        [
+          "Desktop dev on Linux requires native Electrobun runtime libraries before it can boot.",
+          `Missing shared libraries: ${missing.map(({ library }) => library).join(", ")}.`,
+          `Install them with: sudo apt install ${[...new Set(missing.map(({ aptPackage }) => aptPackage))].join(" ")}`,
+        ].join(" "),
+      );
+    },
+    catch: (cause) =>
+      new DevRunnerError({
+        message:
+          cause instanceof Error
+            ? cause.message
+            : "Desktop dev preflight failed while checking Linux shared library dependencies.",
+        cause,
+      }),
+  });
+}
 
 const optionalStringConfig = (name: string): Config.Config<string | undefined> =>
   Config.string(name).pipe(
@@ -378,6 +451,8 @@ const resolveOptionalBooleanOverride = (
 
 export function runDevRunnerWithInput(input: DevRunnerCliInput) {
   return Effect.gen(function* () {
+    yield* ensureLinuxDesktopDependencies(input.mode);
+
     const { portOffset, devInstance } = yield* OffsetConfig.asEffect().pipe(
       Effect.mapError(
         (cause) =>
@@ -446,17 +521,13 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       return;
     }
 
-    const child = yield* ChildProcess.make(
-      "turbo",
-      [...MODE_ARGS[input.mode], ...input.turboArgs],
-      {
-        stdin: "inherit",
-        stdout: "inherit",
-        stderr: "inherit",
-        env,
-        extendEnv: false,
-      },
-    );
+    const child = yield* ChildProcess.make(TURBO_COMMAND, ["run", "turbo", ...MODE_ARGS[input.mode], ...input.turboArgs], {
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+      env,
+      extendEnv: false,
+    });
 
     const exitCode = yield* child.exitCode;
     if (exitCode !== 0) {

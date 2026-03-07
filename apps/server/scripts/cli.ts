@@ -128,11 +128,11 @@ const buildCmd = Command.make(
 
       yield* Effect.log("[cli] Running tsdown...");
       yield* runCommand(
-        ChildProcess.make({
+        ChildProcess.make("bunx", ["--bun", "tsdown"], {
           cwd: serverDir,
           stdout: config.verbose ? "inherit" : "ignore",
           stderr: "inherit",
-        })`bun tsdown`,
+        }),
       );
 
       const webDist = path.join(repoRoot, "apps/web/dist");

@@ -7,7 +7,7 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { markThreadUnread, syncServerReadModel, type AppState } from "./store";
+import { markThreadUnread, markThreadVisited, syncServerReadModel, type AppState } from "./store";
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
@@ -26,6 +26,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     proposedPlans: [],
     error: null,
     createdAt: "2026-02-13T00:00:00.000Z",
+    archivedAt: null,
     latestTurn: null,
     branch: null,
     worktreePath: null,
@@ -63,6 +64,7 @@ function makeReadModelThread(overrides: Partial<OrchestrationReadModel["threads"
     latestTurn: null,
     createdAt: "2026-02-27T00:00:00.000Z",
     updatedAt: "2026-02-27T00:00:00.000Z",
+    archivedAt: null,
     deletedAt: null,
     messages: [],
     activities: [],
@@ -131,6 +133,19 @@ describe("store pure functions", () => {
     const next = markThreadUnread(initialState, ThreadId.makeUnsafe("thread-1"));
 
     expect(next).toEqual(initialState);
+  });
+
+  it("markThreadVisited uses the provided completion timestamp without creating repeated catch-up updates", () => {
+    const visitedAt = "2026-02-25T12:30:00.000Z";
+    const initialState = makeState(
+      makeThread({
+        lastVisitedAt: "2026-02-25T12:29:00.000Z",
+      }),
+    );
+
+    const next = markThreadVisited(initialState, ThreadId.makeUnsafe("thread-1"), visitedAt);
+
+    expect(next.threads[0]?.lastVisitedAt).toBe(visitedAt);
   });
 });
 

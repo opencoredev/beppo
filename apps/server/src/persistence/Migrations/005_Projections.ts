@@ -28,6 +28,7 @@ export default Effect.gen(function* () {
       latest_turn_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
+      archived_at TEXT,
       deleted_at TEXT
     )
   `;

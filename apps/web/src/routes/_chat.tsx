@@ -25,7 +25,7 @@ function ChatRouteLayout() {
   }, [navigate]);
 
   return (
-    <SidebarProvider defaultOpen>
+    <SidebarProvider defaultOpen toggleShortcutKey="/">
       <Sidebar
         side="left"
         collapsible="offcanvas"

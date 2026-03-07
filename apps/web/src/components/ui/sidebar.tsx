@@ -25,6 +25,13 @@ const SIDEBAR_WIDTH = "16rem";
 const SIDEBAR_WIDTH_MOBILE = "calc(100vw - var(--spacing(3)))";
 const SIDEBAR_WIDTH_ICON = "3rem";
 const SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH = 16 * 16;
+const SIDEBAR_MOTION_EASING = "var(--sidebar-motion-ease)";
+
+function getSidebarMotionDuration(isOpen: boolean): string {
+  return isOpen
+    ? "var(--sidebar-motion-open-duration)"
+    : "var(--sidebar-motion-close-duration)";
+}
 
 type SidebarContextProps = {
   state: "expanded" | "collapsed";
@@ -35,6 +42,8 @@ type SidebarContextProps = {
   isMobile: boolean;
   toggleSidebar: () => void;
 };
+
+type SidebarToggleShortcut = "/" | "\\";
 
 type SidebarResizableOptions = {
   maxWidth?: number;
@@ -74,6 +83,20 @@ type SidebarInstanceContextProps = {
 const SidebarContext = React.createContext<SidebarContextProps | null>(null);
 const SidebarInstanceContext = React.createContext<SidebarInstanceContextProps | null>(null);
 
+function matchesSidebarToggleShortcut(
+  event: Pick<
+    KeyboardEvent,
+    "altKey" | "ctrlKey" | "defaultPrevented" | "key" | "metaKey" | "shiftKey"
+  >,
+  shortcutKey: SidebarToggleShortcut,
+): boolean {
+  if (event.defaultPrevented) return false;
+  if (event.altKey || event.shiftKey) return false;
+  const hasSingleModifier = event.metaKey !== event.ctrlKey;
+  if (!hasSingleModifier) return false;
+  return event.key === shortcutKey;
+}
+
 function useSidebar() {
   const context = React.useContext(SidebarContext);
   if (!context) {
@@ -87,6 +110,7 @@ function SidebarProvider({
   defaultOpen = true,
   open: openProp,
   onOpenChange: setOpenProp,
+  toggleShortcutKey,
   className,
   style,
   children,
@@ -95,6 +119,7 @@ function SidebarProvider({
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  toggleShortcutKey?: SidebarToggleShortcut;
 }) {
   const isMobile = useMediaQuery("(max-width: 767px)");
   const [openMobile, setOpenMobile] = React.useState(false);
@@ -145,6 +170,25 @@ function SidebarProvider({
     [state, open, setOpen, isMobile, openMobile, toggleSidebar],
   );
 
+  React.useEffect(() => {
+    if (toggleShortcutKey === undefined) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!matchesSidebarToggleShortcut(event, toggleShortcutKey)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      toggleSidebar();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [toggleShortcutKey, toggleSidebar]);
+
   return (
     <SidebarContext.Provider value={contextValue}>
       <div
@@ -175,6 +219,7 @@ function Sidebar({
   resizable = false,
   className,
   children,
+  style,
   ...props
 }: React.ComponentProps<"div"> & {
   side?: "left" | "right";
@@ -183,6 +228,8 @@ function Sidebar({
   resizable?: boolean | SidebarResizableOptions;
 }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
+  const desktopTransitionDuration = getSidebarMotionDuration(state === "expanded");
+  const isOffcanvasCollapsed = state === "collapsed" && collapsible === "offcanvas";
   const resolvedResizable = React.useMemo<SidebarResolvedResizableOptions | null>(() => {
     if (isMobile || collapsible === "none" || !resizable) {
       return null;
@@ -211,6 +258,7 @@ function Sidebar({
             className,
           )}
           data-slot="sidebar"
+          style={style}
           {...props}
         >
           {children}
@@ -236,6 +284,7 @@ function Sidebar({
             style={
               {
                 "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
+                ...style,
               } as React.CSSProperties
             }
           >
@@ -263,7 +312,7 @@ function Sidebar({
         {/* This is what handles the sidebar gap on desktop */}
         <div
           className={cn(
-            "relative w-(--sidebar-width) bg-transparent transition-[width] duration-200 ease-linear",
+            "relative w-(--sidebar-width) bg-transparent transition-[width]",
             "group-data-[collapsible=offcanvas]:w-0",
             "group-data-[side=right]:rotate-180",
             variant === "floating" || variant === "inset"
@@ -271,13 +320,15 @@ function Sidebar({
               : "group-data-[collapsible=icon]:w-(--sidebar-width-icon)",
           )}
           data-slot="sidebar-gap"
+          style={{
+            transitionDuration: desktopTransitionDuration,
+            transitionTimingFunction: SIDEBAR_MOTION_EASING,
+          }}
         />
         <div
           className={cn(
-            "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear md:flex",
-            side === "left"
-              ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
-              : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
+            "fixed inset-y-0 z-10 hidden h-svh w-(--sidebar-width) overflow-hidden md:flex",
+            side === "left" ? "transition-[left,width] left-0" : "transition-[right,width] right-0",
             // Adjust the padding for floating and inset variants.
             variant === "floating" || variant === "inset"
               ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"
@@ -285,12 +336,31 @@ function Sidebar({
             className,
           )}
           data-slot="sidebar-container"
+          style={{
+            ...(side === "left"
+              ? {
+                  left: isOffcanvasCollapsed ? "calc(var(--sidebar-width) * -1)" : "0px",
+                }
+              : {
+                  right: isOffcanvasCollapsed ? "calc(var(--sidebar-width) * -1)" : "0px",
+                }),
+            transitionDuration: desktopTransitionDuration,
+            transitionTimingFunction: SIDEBAR_MOTION_EASING,
+            ...style,
+          }}
           {...props}
         >
           <div
-            className="flex h-full w-full flex-col bg-sidebar group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow-sm/5"
+            className="flex h-full w-full flex-col overflow-hidden bg-sidebar transition-[opacity,transform] group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow-sm/5"
             data-sidebar="sidebar"
             data-slot="sidebar-inner"
+            style={{
+              opacity: isOffcanvasCollapsed ? 0.94 : 1,
+              transform: isOffcanvasCollapsed ? "scale(0.995)" : "scale(1)",
+              transformOrigin: side === "left" ? "left center" : "right center",
+              transitionDuration: desktopTransitionDuration,
+              transitionTimingFunction: SIDEBAR_MOTION_EASING,
+            }}
           >
             {children}
           </div>
@@ -300,12 +370,19 @@ function Sidebar({
   );
 }
 
-function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<typeof Button>) {
-  const { toggleSidebar, openMobile } = useSidebar();
+function SidebarTrigger({
+  className,
+  onClick,
+  style,
+  ...props
+}: React.ComponentProps<typeof Button>) {
+  const { isMobile, open, openMobile, toggleSidebar } = useSidebar();
+  const isOpen = isMobile ? openMobile : open;
+  const transitionDuration = getSidebarMotionDuration(isOpen);
 
   return (
     <Button
-      className={cn("size-7", className)}
+      className={cn("size-7 transition-[opacity,transform,background-color]", className)}
       data-sidebar="trigger"
       data-slot="sidebar-trigger"
       onClick={(event) => {
@@ -313,10 +390,36 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
         toggleSidebar();
       }}
       size="icon"
+      style={{
+        transitionDuration,
+        transitionTimingFunction: SIDEBAR_MOTION_EASING,
+        ...style,
+      }}
       variant="ghost"
       {...props}
     >
-      {openMobile ? <PanelLeftCloseIcon /> : <PanelLeftIcon />}
+      <span className="relative size-4">
+        <PanelLeftIcon
+          aria-hidden="true"
+          className="absolute inset-0 transition-[opacity,transform]"
+          style={{
+            opacity: isOpen ? 0 : 1,
+            transform: isOpen ? "scale(0.92) rotate(-90deg)" : "scale(1) rotate(0deg)",
+            transitionDuration,
+            transitionTimingFunction: SIDEBAR_MOTION_EASING,
+          }}
+        />
+        <PanelLeftCloseIcon
+          aria-hidden="true"
+          className="absolute inset-0 transition-[opacity,transform]"
+          style={{
+            opacity: isOpen ? 1 : 0,
+            transform: isOpen ? "scale(1) rotate(0deg)" : "scale(0.92) rotate(90deg)",
+            transitionDuration,
+            transitionTimingFunction: SIDEBAR_MOTION_EASING,
+          }}
+        />
+      </span>
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   );
@@ -333,6 +436,7 @@ function SidebarRail({
   onPointerDown,
   onPointerMove,
   onPointerUp,
+  style,
   ...props
 }: React.ComponentProps<"button">) {
   const { open, toggleSidebar } = useSidebar();
@@ -357,6 +461,7 @@ function SidebarRail({
   const canResize = resolvedResizable !== null && open;
   const railLabel = canResize ? "Resize Sidebar" : "Toggle Sidebar";
   const railTitle = canResize ? "Drag to resize sidebar" : "Toggle Sidebar";
+  const transitionDuration = getSidebarMotionDuration(open);
 
   const stopResize = React.useCallback(
     (pointerId: number) => {
@@ -566,7 +671,7 @@ function SidebarRail({
     <button
       aria-label={railLabel}
       className={cn(
-        "-translate-x-1/2 group-data-[side=left]:-right-4 absolute inset-y-0 z-20 hidden w-4 transition-all ease-linear after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-sidebar-border group-data-[side=right]:left-0 sm:flex",
+        "-translate-x-1/2 group-data-[side=left]:-right-4 absolute inset-y-0 z-20 hidden w-4 transition-[opacity,background-color] after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-sidebar-border group-data-[side=right]:left-0 sm:flex",
         "in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize",
         "[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize",
         "group-data-[collapsible=offcanvas]:translate-x-0 hover:group-data-[collapsible=offcanvas]:bg-sidebar group-data-[collapsible=offcanvas]:after:left-full",
@@ -582,6 +687,12 @@ function SidebarRail({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       ref={railRef}
+      style={{
+        opacity: open ? 1 : 0.92,
+        transitionDuration,
+        transitionTimingFunction: SIDEBAR_MOTION_EASING,
+        ...style,
+      }}
       tabIndex={-1}
       title={railTitle}
       type="button"
@@ -988,4 +1099,5 @@ export {
   SidebarSeparator,
   SidebarTrigger,
   useSidebar,
+  matchesSidebarToggleShortcut,
 };

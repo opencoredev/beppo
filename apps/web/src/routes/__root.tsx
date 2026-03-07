@@ -1,3 +1,4 @@
+import { CheckIcon, CircleAlertIcon, CopyIcon, TerminalIcon } from "lucide-react";
 import { ThreadId } from "@t3tools/contracts";
 import {
   Outlet,
@@ -6,11 +7,12 @@ import {
   useNavigate,
   useRouterState,
 } from "@tanstack/react-router";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 
-import { APP_DISPLAY_NAME } from "../branding";
+import { APP_DISPLAY_NAME, APP_STAGE_LABEL, IS_DEV_STAGE } from "../branding";
 import { Button } from "../components/ui/button";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "../components/ui/alert";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
 import { serverConfigQueryOptions, serverQueryKeys } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
@@ -22,18 +24,42 @@ import { terminalRunningSubprocessFromEvent } from "../terminalActivity";
 import { onServerConfigUpdated, onServerWelcome } from "../wsNativeApi";
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
+import beppoAppIcon from "../assets/icon.jpg";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
 }>()({
   component: RootRouteView,
+  shellComponent: RootRouteShell,
   errorComponent: RootRouteErrorView,
   head: () => ({
     meta: [{ name: "title", content: APP_DISPLAY_NAME }],
   }),
 });
 
-function RootRouteView() {
+function RootRouteShell({ children }: { children: React.ReactNode }) {
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const existingLink = document.querySelector("link[rel='icon']") as HTMLLinkElement | null;
+    const link =
+      existingLink ??
+      Object.assign(document.createElement("link"), {
+        rel: "icon",
+      });
+    const previousHref = existingLink?.href ?? "";
+    link.href = beppoAppIcon;
+    if (!existingLink) {
+      document.head.append(link);
+    }
+
+    return () => {
+      link.href = previousHref;
+      if (!existingLink && previousHref.length === 0) {
+        link.remove();
+      }
+    };
+  }, []);
+
   if (!readNativeApi()) {
     return (
       <div className="flex h-screen flex-col bg-background text-foreground">
@@ -51,51 +77,129 @@ function RootRouteView() {
       <AnchoredToastProvider>
         <EventRouter />
         <DesktopProjectBootstrap />
-        <Outlet />
+        {children}
+        <AppStageBadge />
       </AnchoredToastProvider>
     </ToastProvider>
   );
 }
 
-function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
-  const message = errorMessage(error);
-  const details = errorDetails(error);
+function RootRouteView() {
+  return <Outlet />;
+}
+
+function AppStageBadge() {
+  if (!IS_DEV_STAGE) {
+    return null;
+  }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
-      <div className="pointer-events-none absolute inset-0 opacity-80">
-        <div className="absolute inset-x-0 top-0 h-44 bg-[radial-gradient(44rem_16rem_at_top,color-mix(in_srgb,var(--color-red-500)_16%,transparent),transparent)]" />
-        <div className="absolute inset-0 bg-[linear-gradient(145deg,color-mix(in_srgb,var(--background)_90%,var(--color-black))_0%,var(--background)_55%)]" />
+    <div className="pointer-events-none fixed right-0 bottom-0 z-40">
+      <div className="flex h-9 items-center gap-2 border-t border-l border-border bg-[color-mix(in_srgb,var(--color-card)_88%,var(--color-foreground)_12%)] pr-3 pl-4 shadow-[-1px_-1px_0_color-mix(in_srgb,var(--color-foreground)_14%,transparent)] [clip-path:polygon(12px_0,100%_0,100%_100%,0_100%,0_12px)]">
+        <TerminalIcon className="size-3.5 text-foreground/75" />
+        <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-foreground">
+          {APP_STAGE_LABEL}
+        </span>
       </div>
+    </div>
+  );
+}
 
-      <section className="relative w-full max-w-xl rounded-2xl border border-border/80 bg-card/90 p-6 shadow-2xl shadow-black/20 backdrop-blur-md sm:p-8">
-        <p className="text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
-          {APP_DISPLAY_NAME}
-        </p>
-        <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
-          Something went wrong.
-        </h1>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{message}</p>
+function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
+  const message = errorMessage(error);
+  const summary = errorSummary(error);
+  const description =
+    message.replace(/\s+/g, " ").trim() === summary
+      ? "Open details or copy the full trace if you need the full error."
+      : message;
+  const details = errorDetails(error);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-        <div className="mt-5 flex flex-wrap gap-2">
-          <Button size="sm" onClick={() => reset()}>
-            Try again
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
-            Reload app
+  useEffect(() => {
+    return () => {
+      if (copyResetTimerRef.current !== null) {
+        clearTimeout(copyResetTimerRef.current);
+        copyResetTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  return (
+    <div className="pointer-events-none fixed inset-x-0 top-0 z-[60] flex justify-end p-3 sm:p-4">
+      <section className="pointer-events-auto w-full max-w-md rounded-2xl border border-border/80 bg-popover/96 shadow-2xl shadow-black/20 backdrop-blur-md">
+        <div className="flex items-start justify-between gap-3 border-b border-border/70 px-4 py-3">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              {APP_DISPLAY_NAME}
+            </p>
+            <h1 className="mt-1 text-sm font-semibold text-foreground">App error</h1>
+          </div>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            title={copied ? "Copied" : "Copy error details"}
+            aria-label={copied ? "Copied" : "Copy error details"}
+            onClick={() => {
+              void navigator.clipboard
+                .writeText(details)
+                .then(() => {
+                  if (copyResetTimerRef.current !== null) {
+                    clearTimeout(copyResetTimerRef.current);
+                  }
+                  setCopied(true);
+                  copyResetTimerRef.current = setTimeout(() => {
+                    setCopied(false);
+                    copyResetTimerRef.current = null;
+                  }, 1200);
+                })
+                .catch(() => undefined);
+            }}
+          >
+            {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
           </Button>
         </div>
 
-        <details className="group mt-5 overflow-hidden rounded-lg border border-border/70 bg-background/55">
-          <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-muted-foreground">
-            <span className="group-open:hidden">Show error details</span>
-            <span className="hidden group-open:inline">Hide error details</span>
-          </summary>
-          <pre className="max-h-56 overflow-auto border-t border-border/70 bg-background/80 px-3 py-2 text-xs text-foreground/85">
-            {details}
-          </pre>
-        </details>
+        <div className="px-4 py-3">
+          <Alert variant="error">
+            <CircleAlertIcon />
+            <AlertTitle>{summary}</AlertTitle>
+            <AlertDescription className="line-clamp-3" title={message}>
+              {description}
+            </AlertDescription>
+            <AlertAction className="sm:self-start">
+              <Button size="xs" onClick={() => reset()}>
+                Try again
+              </Button>
+              <Button size="xs" variant="outline" onClick={() => window.location.reload()}>
+                Reload
+              </Button>
+            </AlertAction>
+          </Alert>
+
+          <div className="mt-3 overflow-hidden rounded-xl border border-border/70 bg-background/65">
+            <div className="flex items-center justify-between gap-2 px-3 py-2">
+              <button
+                type="button"
+                className="cursor-pointer text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                onClick={() => setDetailsOpen((open) => !open)}
+              >
+                {detailsOpen ? "Hide details" : "Show details"}
+              </button>
+              <span className="text-[11px] text-muted-foreground/80">
+                Copy includes full trace
+              </span>
+            </div>
+            {detailsOpen ? (
+              <pre className="max-h-52 overflow-auto border-t border-border/70 bg-background/80 px-3 py-2 text-xs text-foreground/85">
+                {details}
+              </pre>
+            ) : null}
+          </div>
+        </div>
       </section>
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-background/8 backdrop-blur-[1px]" />
     </div>
   );
 }
@@ -126,6 +230,16 @@ function errorDetails(error: unknown): string {
   } catch {
     return "No additional error details are available.";
   }
+}
+
+function errorSummary(error: unknown): string {
+  const message = errorMessage(error).replace(/\s+/g, " ").trim();
+  const firstSentence =
+    message.split(/(?<=[.!?])\s+/)[0]?.trim() || "Something went wrong in the app.";
+  if (firstSentence.length <= 120) {
+    return firstSentence;
+  }
+  return `${firstSentence.slice(0, 117).trimEnd()}...`;
 }
 
 function EventRouter() {

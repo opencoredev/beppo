@@ -1,4 +1,10 @@
+import * as OS from "node:os";
+
 import type { ElectrobunConfig } from "./src/electrobun-runtime";
+
+const isWslBuild =
+  Boolean(process.env.WSL_DISTRO_NAME) ||
+  OS.release().toLowerCase().includes("microsoft");
 
 const config = {
   app: {
@@ -29,7 +35,21 @@ const config = {
     },
     linux: {
       icon: "resources/icon.png",
-      defaultRenderer: "native",
+      defaultRenderer: isWslBuild ? "cef" : "native",
+      ...(isWslBuild
+        ? {
+            bundleCEF: true,
+            chromiumFlags: {
+              "disable-gpu": true,
+              "disable-gpu-compositing": true,
+              "enable-unsafe-swiftshader": true,
+              "use-angle": "swiftshader",
+              "use-gl": "angle",
+              "enable-features": "UseOzonePlatform",
+              "ozone-platform": "wayland",
+            },
+          }
+        : {}),
     },
   },
   ...(process.env.T3CODE_DESKTOP_UPDATE_BASE_URL
