@@ -52,10 +52,24 @@ export async function restoreThreadCommand(api: NativeApi, threadId: ThreadId): 
   });
 }
 
-export async function deleteThreadCommand(api: NativeApi, threadId: ThreadId): Promise<void> {
+export async function deleteThreadCommand(
+  api: NativeApi,
+  thread: Pick<Thread, "id" | "session">,
+): Promise<void> {
+  if (thread.session && thread.session.status !== "closed") {
+    await api.orchestration
+      .dispatchCommand({
+        type: "thread.session.stop",
+        commandId: newCommandId(),
+        threadId: thread.id,
+        createdAt: new Date().toISOString(),
+      })
+      .catch(() => undefined);
+  }
+
   try {
     await api.terminal.close({
-      threadId,
+      threadId: thread.id,
       deleteHistory: true,
     });
   } catch {
@@ -65,6 +79,6 @@ export async function deleteThreadCommand(api: NativeApi, threadId: ThreadId): P
   await api.orchestration.dispatchCommand({
     type: "thread.delete",
     commandId: newCommandId(),
-    threadId,
+    threadId: thread.id,
   });
 }

@@ -658,7 +658,7 @@ export default function Sidebar() {
         ? formatWorktreePathForDisplay(orphanedWorktreePath)
         : null;
 
-      await deleteThreadCommand(api, thread.id);
+      await deleteThreadCommand(api, thread);
       clearComposerDraftForThread(thread.id);
       clearProjectDraftThreadById(thread.projectId, thread.id);
       clearTerminalState(thread.id);

@@ -74,6 +74,7 @@ import { parseBase64DataUrl } from "./imageMime.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 
 const ARCHIVED_THREAD_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const ARCHIVED_THREAD_PURGE_INTERVAL_MS = 10 * 60 * 1000;
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -599,9 +600,21 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
   let welcomeBootstrapProjectId: ProjectId | undefined;
   let welcomeBootstrapThreadId: ThreadId | undefined;
+  const archivedThreadPurgeLastRunAt = yield* Ref.make(0);
   const purgeExpiredArchivedThreads = Effect.fnUntraced(function* () {
-    const snapshot = yield* projectionReadModelQuery.getSnapshot();
     const nowMs = Date.now();
+    const shouldRun = yield* Ref.modify(archivedThreadPurgeLastRunAt, (lastRunAt) => {
+      if (nowMs - lastRunAt < ARCHIVED_THREAD_PURGE_INTERVAL_MS) {
+        return [false, lastRunAt] as const;
+      }
+      return [true, nowMs] as const;
+    });
+
+    if (!shouldRun) {
+      return;
+    }
+
+    const snapshot = yield* projectionReadModelQuery.getSnapshot();
     const expiredThreadIds = snapshot.threads
       .filter((thread) => {
         if (thread.deletedAt !== null || thread.archivedAt === null) {

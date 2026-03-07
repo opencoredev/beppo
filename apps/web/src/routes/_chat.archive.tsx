@@ -353,7 +353,7 @@ function ArchiveRouteView() {
         continue;
       }
       try {
-        await deleteThreadCommand(api, thread.id);
+        await deleteThreadCommand(api, thread);
         clearComposerDraftForThread(thread.id);
         clearProjectDraftThreadById(thread.projectId, thread.id);
         clearTerminalState(thread.id);

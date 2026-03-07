@@ -58,7 +58,7 @@
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
   --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1)
+  --color-chart-1: var(--chart-1);
 }
 
 @layer base {
@@ -69,7 +69,8 @@
     @apply relative bg-background text-foreground;
   }
   html {
-    @apply font-sans;}
+    @apply font-sans;
+  }
 }
 
 /* Suppress all transitions during theme changes */
@@ -166,7 +167,7 @@
 
   --sidebar-border: oklch(0.922 0.005 34.3);
 
-  --sidebar-ring: oklch(0.714 0.014 41.2)
+  --sidebar-ring: oklch(0.714 0.014 41.2);
 }
 
 @media (prefers-reduced-motion: reduce) {

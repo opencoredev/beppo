@@ -30,8 +30,11 @@ function NewThreadRouteView() {
   const threadsHydrated = useStore((store) => store.threadsHydrated);
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
-  const draftThreadId = Route.useSearch({
-    select: (search) => search.draftThreadId,
+  const { context: draftContext, draftThreadId } = Route.useSearch({
+    select: (search) => ({
+      context: search.context ?? "global",
+      draftThreadId: search.draftThreadId,
+    }),
   });
   const getDraftThreadByProjectId = useComposerDraftStore((store) => store.getDraftThreadByProjectId);
   const getDraftThread = useComposerDraftStore((store) => store.getDraftThread);
@@ -117,7 +120,11 @@ function NewThreadRouteView() {
   if (draftThreadId && (draftThreadExists || threadExists)) {
     return (
       <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
-        <ChatView key={draftThreadId} threadId={draftThreadId} />
+        <ChatView
+          key={draftThreadId}
+          threadId={draftThreadId}
+          draftSurface={draftContext === "global" ? "global" : "project"}
+        />
       </SidebarInset>
     );
   }
