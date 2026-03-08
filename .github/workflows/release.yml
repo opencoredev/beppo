@@ -129,6 +129,7 @@ jobs:
         run: bun run build --filter=@t3tools/web --filter=t3
 
       - name: Build desktop artifact
+        if: ${{ matrix.platform != 'win' }}
         shell: bash
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
@@ -183,6 +184,43 @@ jobs:
           else
             echo "Signing disabled for ${{ matrix.platform }}."
           fi
+
+          bun run dist:desktop:artifact
+
+      - name: Build desktop artifact
+        if: ${{ matrix.platform == 'win' }}
+        shell: pwsh
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
+          AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
+          ELECTROBUN_TARGETS: ${{ matrix.electrobun_target }}
+          T3CODE_DESKTOP_VERSION: ${{ needs.preflight.outputs.version }}
+          T3CODE_DESKTOP_UPDATE_BASE_URL: https://github.com/opencoredev/beppo/releases/latest/download
+        run: |
+          $requiredVars = @(
+            "AZURE_TENANT_ID",
+            "AZURE_CLIENT_ID",
+            "AZURE_CLIENT_SECRET",
+            "AZURE_TRUSTED_SIGNING_ENDPOINT",
+            "AZURE_TRUSTED_SIGNING_ACCOUNT_NAME",
+            "AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME",
+            "AZURE_TRUSTED_SIGNING_PUBLISHER_NAME"
+          )
+
+          $missingVars = $requiredVars | Where-Object {
+            [string]::IsNullOrWhiteSpace((Get-Item -Path "Env:$_" -ErrorAction SilentlyContinue).Value)
+          }
+
+          if ($missingVars.Count -eq 0) {
+            Write-Host "Windows signing enabled (Azure Trusted Signing)."
+          } else {
+            Write-Host "Windows signing disabled (missing one or more Azure Trusted Signing secrets)."
+          }
 
           bun run dist:desktop:artifact
 
