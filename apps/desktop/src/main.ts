@@ -264,11 +264,13 @@ async function waitForHttpUrl(url: string, timeoutMs: number): Promise<void> {
 async function waitForTcpEndpoint(url: string, timeoutMs: number): Promise<void> {
   const parsed = new URL(url);
   const host = parsed.hostname;
-  const port = Number(parsed.port);
+  const portStr = parsed.port;
 
-  if (!host || !port) {
+  if (!host || !portStr) {
     return;
   }
+
+  const port = Number(portStr);
 
   const startedAt = Date.now();
   let lastError: unknown = null;
@@ -866,7 +868,6 @@ function createWindow(): DesktopWindow {
     window.setTitle(APP_DISPLAY_NAME);
     window.show();
     window.focus();
-    activateMacAppBundle();
     emitUpdateState();
   });
 

@@ -28,6 +28,7 @@ const config = {
     targets: process.env.ELECTROBUN_TARGETS ?? "current",
     bun: {
       entrypoint: "src/bun/index.ts",
+      sourcemap: "linked",
     },
     copy: {
       "preload.js": "preload.js",

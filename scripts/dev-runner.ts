@@ -129,7 +129,7 @@ function ensureLinuxDesktopDependencies(mode: DevMode): Effect.Effect<void, DevR
 function cleanupDesktopDevArtifactsAndProcesses(
   mode: DevMode,
 ): Effect.Effect<void, DevRunnerError> {
-  if (mode !== "dev:desktop") {
+  if (mode !== "dev:desktop" || process.platform === "win32") {
     return Effect.void;
   }
 
