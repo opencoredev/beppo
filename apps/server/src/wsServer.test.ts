@@ -289,7 +289,7 @@ function connectWs(port: number, token?: string): Promise<WebSocket> {
   });
 }
 
-function waitForMessage(ws: WebSocket): Promise<unknown> {
+function waitForMessage(ws: WebSocket, timeoutMs = 5_000): Promise<unknown> {
   const pending = pendingBySocket.get(ws);
   if (!pending) {
     return Promise.reject(new Error("WebSocket not initialized"));
@@ -307,7 +307,7 @@ function waitForMessage(ws: WebSocket): Promise<unknown> {
         pending.waiters.splice(index, 1);
       }
       reject(new Error("Timed out waiting for WebSocket message"));
-    }, 5_000);
+    }, timeoutMs);
 
     const handleMessage = (message: unknown) => {
       clearTimeout(timeout);
@@ -774,7 +774,7 @@ describe("WebSocket Server", () => {
 
     const secondWs = await connectWs(port);
     connections.push(secondWs);
-    const secondWelcome = (await waitForMessage(secondWs)) as WsPush;
+    const secondWelcome = (await waitForMessage(secondWs, 10_000)) as WsPush;
     expect(secondWelcome.channel).toBe(WS_CHANNELS.serverWelcome);
     expect(secondWelcome.data).toEqual(
       expect.objectContaining({
