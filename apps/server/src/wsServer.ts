@@ -118,6 +118,7 @@ function closeWebSocketClient(client: WebSocket): Effect.Effect<void> {
   return Effect.callback<void>((resume) => {
     const timeout = setTimeout(() => {
       cleanup();
+      client.terminate();
       resume(Effect.void);
     }, 1_000);
 
@@ -144,6 +145,9 @@ function rejectUpgrade(socket: Duplex, statusCode: number, message: string): voi
       `Content-Length: ${Buffer.byteLength(message)}\r\n` +
       "\r\n" +
       message,
+    () => {
+      socket.destroy();
+    },
   );
 }
 
@@ -301,6 +305,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const providerStatuses = yield* providerHealth.getStatuses;
 
   const clients = yield* Ref.make(new Set<WebSocket>());
+  const openSockets = new Set<Duplex>();
   const logger = createLogger("ws");
 
   function logOutgoingPush(push: WsPush, recipients: number) {
@@ -640,6 +645,13 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
   const listenOptions = host ? { host, port } : { port };
 
+  httpServer.on("connection", (socket) => {
+    openSockets.add(socket);
+    socket.once("close", () => {
+      openSockets.delete(socket);
+    });
+  });
+
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionReadModelQuery = yield* ProjectionSnapshotQuery;
   const checkpointDiffQuery = yield* CheckpointDiffQuery;
@@ -803,14 +815,23 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   );
 
   yield* Effect.addFinalizer(() =>
-    Effect.all([
-      closeAllClients,
-      closeWebSocketServer.pipe(
-        Effect.catch((error) =>
-          Effect.logWarning("failed to close web socket server", { cause: error }),
+    closeAllClients.pipe(
+      Effect.andThen(
+        closeWebSocketServer.pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("failed to close web socket server", { cause: error }),
+          ),
         ),
       ),
-    ]),
+      Effect.andThen(
+        Effect.sync(() => {
+          for (const socket of openSockets) {
+            socket.destroy();
+          }
+          openSockets.clear();
+        }),
+      ),
+    ),
   );
 
   const routeRequest = Effect.fnUntraced(function* (request: WebSocketRequest) {

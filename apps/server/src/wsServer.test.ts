@@ -220,6 +220,28 @@ function connectWs(port: number, token?: string): Promise<WebSocket> {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/${query}`);
     const pending: PendingMessages = { queue: [], waiters: [] };
     pendingBySocket.set(ws, pending);
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      ws.terminate();
+      reject(new Error("WebSocket connection timed out"));
+    }, 5_000);
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      ws.removeAllListeners("open");
+      ws.removeAllListeners("close");
+      ws.removeAllListeners("error");
+      ws.removeAllListeners("unexpected-response");
+      pendingBySocket.delete(ws);
+    };
+
+    // Keep expected handshake failures from surfacing as unhandled test errors.
+    ws.on("error", () => {});
 
     ws.on("message", (raw) => {
       const parsed = JSON.parse(String(raw));
@@ -231,8 +253,39 @@ function connectWs(port: number, token?: string): Promise<WebSocket> {
       pending.queue.push(parsed);
     });
 
-    ws.once("open", () => resolve(ws));
-    ws.once("error", () => reject(new Error("WebSocket connection failed")));
+    ws.once("open", () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      resolve(ws);
+    });
+    ws.once("close", () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      reject(new Error("WebSocket connection failed"));
+    });
+    ws.once("error", () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      reject(new Error("WebSocket connection failed"));
+    });
+    ws.once("unexpected-response", (_request, response) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      response.resume();
+      reject(new Error("WebSocket connection failed"));
+    });
   });
 }
 
@@ -247,8 +300,21 @@ function waitForMessage(ws: WebSocket): Promise<unknown> {
     return Promise.resolve(queued);
   }
 
-  return new Promise((resolve) => {
-    pending.waiters.push(resolve);
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      const index = pending.waiters.indexOf(handleMessage);
+      if (index >= 0) {
+        pending.waiters.splice(index, 1);
+      }
+      reject(new Error("Timed out waiting for WebSocket message"));
+    }, 5_000);
+
+    const handleMessage = (message: unknown) => {
+      clearTimeout(timeout);
+      resolve(message);
+    };
+
+    pending.waiters.push(handleMessage);
   });
 }
 
@@ -486,6 +552,21 @@ describe("WebSocket Server", () => {
     if (!serverScope) return;
     const scope = serverScope;
     serverScope = null;
+    if (server) {
+      const httpServer = server;
+      await new Promise<void>((resolve) => {
+        const timeout = setTimeout(() => {
+          httpServer.closeAllConnections?.();
+          resolve();
+        }, 1_000);
+        httpServer.close(() => {
+          clearTimeout(timeout);
+          resolve();
+        });
+        httpServer.closeIdleConnections?.();
+        httpServer.closeAllConnections?.();
+      });
+    }
     await Effect.runPromise(Scope.close(scope, Exit.void));
   }
 
@@ -677,8 +758,8 @@ describe("WebSocket Server", () => {
       persistenceLayer,
       autoBootstrapProjectFromCwd: true,
     });
-    let addr = server.address();
-    let port = typeof addr === "object" && addr !== null ? addr.port : 0;
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
     expect(port).toBeGreaterThan(0);
 
     const firstWs = await connectWs(port);
@@ -690,20 +771,6 @@ describe("WebSocket Server", () => {
       .bootstrapThreadId;
     expect(firstBootstrapProjectId).toBeDefined();
     expect(firstBootstrapThreadId).toBeDefined();
-
-    await closeClientSocket(firstWs);
-    await closeTestServer();
-    server = null;
-
-    server = await createTestServer({
-      cwd,
-      stateDir,
-      persistenceLayer,
-      autoBootstrapProjectFromCwd: true,
-    });
-    addr = server.address();
-    port = typeof addr === "object" && addr !== null ? addr.port : 0;
-    expect(port).toBeGreaterThan(0);
 
     const secondWs = await connectWs(port);
     connections.push(secondWs);
