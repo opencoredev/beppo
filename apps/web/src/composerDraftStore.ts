@@ -527,15 +527,27 @@ function toHydratedThreadDraft(
 
 const composerDraftStateStorage: StateStorage = {
   getItem(name) {
-    return localStorage.getItem(name) ?? localStorage.getItem(LEGACY_COMPOSER_DRAFT_STORAGE_KEY);
+    const storage = globalThis.localStorage;
+    if (!storage) {
+      return null;
+    }
+    return storage.getItem(name) ?? storage.getItem(LEGACY_COMPOSER_DRAFT_STORAGE_KEY);
   },
   setItem(name, value) {
-    localStorage.setItem(name, value);
-    localStorage.removeItem(LEGACY_COMPOSER_DRAFT_STORAGE_KEY);
+    const storage = globalThis.localStorage;
+    if (!storage) {
+      return;
+    }
+    storage.setItem(name, value);
+    storage.removeItem(LEGACY_COMPOSER_DRAFT_STORAGE_KEY);
   },
   removeItem(name) {
-    localStorage.removeItem(name);
-    localStorage.removeItem(LEGACY_COMPOSER_DRAFT_STORAGE_KEY);
+    const storage = globalThis.localStorage;
+    if (!storage) {
+      return;
+    }
+    storage.removeItem(name);
+    storage.removeItem(LEGACY_COMPOSER_DRAFT_STORAGE_KEY);
   },
 };
 
