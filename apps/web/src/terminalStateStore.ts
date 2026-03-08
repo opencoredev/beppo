@@ -6,8 +6,9 @@
  */
 
 import type { ThreadId } from "@t3tools/contracts";
+import { APP_STORAGE_PREFIX, LEGACY_APP_STORAGE_PREFIX } from "@t3tools/shared/branding";
 import { create } from "zustand";
-import { createJSONStorage, persist } from "zustand/middleware";
+import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import {
   DEFAULT_THREAD_TERMINAL_HEIGHT,
   DEFAULT_THREAD_TERMINAL_ID,
@@ -25,7 +26,34 @@ interface ThreadTerminalState {
   activeTerminalGroupId: string;
 }
 
-const TERMINAL_STATE_STORAGE_KEY = "t3code:terminal-state:v1";
+const TERMINAL_STATE_STORAGE_KEY = `${APP_STORAGE_PREFIX}:terminal-state:v1`;
+const LEGACY_TERMINAL_STATE_STORAGE_KEY = `${LEGACY_APP_STORAGE_PREFIX}:terminal-state:v1`;
+
+const terminalStateStorage: StateStorage = {
+  getItem(name) {
+    const storage = globalThis.localStorage;
+    if (!storage) {
+      return null;
+    }
+    return storage.getItem(name) ?? storage.getItem(LEGACY_TERMINAL_STATE_STORAGE_KEY);
+  },
+  setItem(name, value) {
+    const storage = globalThis.localStorage;
+    if (!storage) {
+      return;
+    }
+    storage.setItem(name, value);
+    storage.removeItem(LEGACY_TERMINAL_STATE_STORAGE_KEY);
+  },
+  removeItem(name) {
+    const storage = globalThis.localStorage;
+    if (!storage) {
+      return;
+    }
+    storage.removeItem(name);
+    storage.removeItem(LEGACY_TERMINAL_STATE_STORAGE_KEY);
+  },
+};
 
 function normalizeTerminalIds(terminalIds: string[]): string[] {
   const ids = [...new Set(terminalIds.map((id) => id.trim()).filter((id) => id.length > 0))].slice(
@@ -523,7 +551,7 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
     {
       name: TERMINAL_STATE_STORAGE_KEY,
       version: 1,
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => terminalStateStorage),
       partialize: (state) => ({
         terminalStateByThreadId: state.terminalStateByThreadId,
       }),

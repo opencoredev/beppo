@@ -1,6 +1,7 @@
 import * as ChildProcess from "node:child_process";
 import * as Crypto from "node:crypto";
 import * as FS from "node:fs";
+import * as Net from "node:net";
 import * as OS from "node:os";
 import * as Path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -17,6 +18,12 @@ import Electrobun, {
 import * as Effect from "effect/Effect";
 import type { ContextMenuItem, DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
 import { NetService } from "@t3tools/shared/Net";
+import {
+  APP_BUNDLE_IDENTIFIER,
+  APP_HIDDEN_DIR,
+  DESKTOP_WS_URL_SEARCH_PARAM,
+  LEGACY_DESKTOP_WS_URL_SEARCH_PARAM,
+} from "@t3tools/shared/branding";
 import { RotatingFileSink } from "@t3tools/shared/logging";
 import { resolveWindowsWslHomePathSync } from "@t3tools/shared/wsl";
 
@@ -49,9 +56,11 @@ const MENU_ACTION_EVENT = "menu-action";
 const UPDATE_STATE_EVENT = "update-state";
 
 const STATE_DIR =
-  process.env.T3CODE_STATE_DIR?.trim() || Path.join(OS.homedir(), ".t3", "userdata");
+  process.env.T3CODE_STATE_DIR?.trim() || Path.join(OS.homedir(), APP_HIDDEN_DIR, "userdata");
 const ROOT_DIR = Path.resolve(import.meta.dir, "..");
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
+const externalDevBackendWsUrl = process.env.VITE_WS_URL?.trim() || "";
+const useExternalDevBackend = isDevelopment && externalDevBackendWsUrl.length > 0;
 const APP_DISPLAY_NAME = isDevelopment ? "Beppo (Dev)" : desktopPackageJson.productName ?? "Beppo";
 const LOG_DIR = Path.join(STATE_DIR, "logs");
 const LOG_FILE_MAX_BYTES = 10 * 1024 * 1024;
@@ -144,6 +153,16 @@ function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function resolveAppBundlePath(): string | null {
+  if (process.platform !== "darwin") return null;
+
+  const executablePath = process.argv0?.trim();
+  if (!executablePath) return null;
+
+  const bundlePath = Path.resolve(executablePath, "../../..");
+  return bundlePath.endsWith(".app") ? bundlePath : null;
+}
+
 function initializeLogging(): void {
   try {
     desktopLogSink = new RotatingFileSink({
@@ -206,12 +225,122 @@ function resolveWindowUrl(): string {
   }
 
   const resolved = new URL(baseUrl);
-  resolved.searchParams.set("t3DesktopWsUrl", backendWsUrl);
+  resolved.searchParams.set(DESKTOP_WS_URL_SEARCH_PARAM, backendWsUrl);
+  resolved.searchParams.set(LEGACY_DESKTOP_WS_URL_SEARCH_PARAM, backendWsUrl);
   return resolved.toString();
 }
 
 function resolvePreloadPath(): string {
   return Path.join(ROOT_DIR, "preload.js");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForHttpUrl(url: string, timeoutMs: number): Promise<void> {
+  const startedAt = Date.now();
+  let lastError: unknown = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const remaining = timeoutMs - (Date.now() - startedAt);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), Math.min(5_000, remaining));
+      try {
+        const response = await fetch(url, { method: "GET", signal: controller.signal });
+        if (response.ok) {
+          return;
+        }
+        lastError = new Error(`HTTP ${response.status}`);
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch (error) {
+      lastError = error;
+    }
+
+    await sleep(150);
+  }
+
+  throw new Error(
+    `Timed out waiting for desktop dev URL ${url}: ${formatErrorMessage(lastError)}`,
+  );
+}
+
+async function waitForTcpEndpoint(url: string, timeoutMs: number): Promise<void> {
+  const parsed = new URL(url);
+  const host = parsed.hostname;
+  const portStr = parsed.port;
+
+  if (!host || !portStr) {
+    return;
+  }
+
+  const port = Number(portStr);
+
+  const startedAt = Date.now();
+  let lastError: unknown = null;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const socket = Net.createConnection({ host, port });
+        const cleanup = () => {
+          socket.removeAllListeners();
+          socket.destroy();
+        };
+
+        socket.once("connect", () => {
+          cleanup();
+          resolve();
+        });
+        socket.once("error", (error) => {
+          cleanup();
+          reject(error);
+        });
+      });
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+
+    await sleep(150);
+  }
+
+  throw new Error(
+    `Timed out waiting for desktop dev backend ${url}: ${formatErrorMessage(lastError)}`,
+  );
+}
+
+function activateMacAppBundle(): void {
+  if (process.platform !== "darwin") return;
+
+  try {
+    const child = ChildProcess.spawn("open", ["-b", APP_BUNDLE_IDENTIFIER], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+    writeDesktopLog(`requested app activation bundleId=${APP_BUNDLE_IDENTIFIER}`);
+  } catch (error) {
+    const bundlePath = resolveAppBundlePath();
+    if (!bundlePath) {
+      writeDesktopLog(`app activation failed error=${formatErrorMessage(error)}`);
+      return;
+    }
+
+    try {
+      const child = ChildProcess.spawn("open", ["-a", bundlePath], {
+        detached: true,
+        stdio: "ignore",
+      });
+      child.unref();
+      writeDesktopLog(`requested app activation bundle=${bundlePath}`);
+    } catch (fallbackError) {
+      writeDesktopLog(`app activation failed error=${formatErrorMessage(fallbackError)}`);
+    }
+  }
 }
 
 function createResponse(
@@ -452,6 +581,7 @@ function scheduleBackendRestart(reason: string): void {
 }
 
 function startBackend(): void {
+  if (useExternalDevBackend) return;
   if (isQuitting || backendProcess) return;
 
   const backendEntry = resolveBackendEntry();
@@ -519,6 +649,7 @@ function stopBackend(): void {
 }
 
 async function stopBackendAndWaitForExit(timeoutMs = 5_000): Promise<void> {
+  if (useExternalDevBackend) return;
   if (restartTimer) {
     clearTimeout(restartTimer);
     restartTimer = null;
@@ -731,8 +862,19 @@ function createWindow(): DesktopWindow {
     sandbox: false,
   });
 
+  writeDesktopLog(`created window id=${window.id} renderer=${renderer} url=${resolveWindowUrl()}`);
+
+  // Electrobun windows may not become visible automatically on macOS dev launches
+  // when started from a terminal, so explicitly show/focus the first window.
+  window.show();
+  window.focus();
+  activateMacAppBundle();
+
   window.webview.on("dom-ready", () => {
+    writeDesktopLog(`window dom-ready id=${window.id}`);
     window.setTitle(APP_DISPLAY_NAME);
+    window.show();
+    window.focus();
     emitUpdateState();
   });
 
@@ -753,10 +895,6 @@ function createWindow(): DesktopWindow {
       });
   };
 
-  if (isDevelopment && !isWslRuntime) {
-    window.webview.openDevTools();
-  }
-
   if (isWslRuntime) {
     window.focus();
   }
@@ -766,17 +904,31 @@ function createWindow(): DesktopWindow {
 
 async function bootstrap(): Promise<void> {
   writeDesktopLog("bootstrap start");
-  backendPort = await Effect.service(NetService).pipe(
-    Effect.flatMap((net) => net.reserveLoopbackPort()),
-    Effect.provide(NetService.layer),
-    Effect.runPromise,
-  );
-  backendAuthToken = Crypto.randomBytes(24).toString("hex");
-  backendWsUrl = `ws://127.0.0.1:${backendPort}/?token=${encodeURIComponent(backendAuthToken)}`;
-  writeDesktopLog(`bootstrap resolved websocket url=${backendWsUrl}`);
+  if (useExternalDevBackend) {
+    const devUrl = process.env.VITE_DEV_SERVER_URL;
+    if (!devUrl) {
+      throw new Error("Desktop runtime missing VITE_DEV_SERVER_URL.");
+    }
+    await Promise.all([
+      waitForHttpUrl(devUrl, 15_000),
+      waitForTcpEndpoint(externalDevBackendWsUrl, 15_000),
+    ]);
+    backendWsUrl = externalDevBackendWsUrl;
+    writeDesktopLog(`bootstrap using external dev websocket url=${backendWsUrl}`);
+  } else {
+    backendPort = await Effect.service(NetService).pipe(
+      Effect.flatMap((net) => net.reserveLoopbackPort()),
+      Effect.provide(NetService.layer),
+      Effect.runPromise,
+    );
+    backendAuthToken = Crypto.randomBytes(24).toString("hex");
+    backendWsUrl = `ws://127.0.0.1:${backendPort}/?token=${encodeURIComponent(backendAuthToken)}`;
+    writeDesktopLog(`bootstrap resolved websocket url=${backendWsUrl}`);
+    startBackend();
+  }
 
-  startBackend();
   mainWindow = createWindow();
+  writeDesktopLog(`bootstrap created main window id=${mainWindow.id}`);
 }
 
 function registerLifecycleHandlers(): void {

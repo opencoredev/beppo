@@ -62,7 +62,11 @@ function makeFakeCodexBinary(dir: string) {
         '  printf "%s\\n" "$T3_FAKE_CODEX_STDERR" >&2',
         "fi",
         'if [ -n "$output_path" ]; then',
-        '  node -e \'const fs=require("node:fs"); const value=process.argv[2] ?? ""; fs.writeFileSync(process.argv[1], Buffer.from(value, "base64"));\' "$output_path" "${T3_FAKE_CODEX_OUTPUT_B64:-e30=}"',
+        '  if [ -n "$T3_FAKE_CODEX_OUTPUT_FILE" ] && [ -f "$T3_FAKE_CODEX_OUTPUT_FILE" ]; then',
+        '    cp "$T3_FAKE_CODEX_OUTPUT_FILE" "$output_path"',
+        "  else",
+        '    printf "%s" "{}" > "$output_path"',
+        "  fi",
         "fi",
         'exit "${T3_FAKE_CODEX_EXIT_CODE:-0}"',
         "",
@@ -89,17 +93,20 @@ function withFakeCodexEnv<A, E, R>(
       const fs = yield* FileSystem.FileSystem;
       const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-codex-text-" });
       const binDir = yield* makeFakeCodexBinary(tempDir);
+      const outputFixturePath = `${tempDir}/codex-output.json`;
       const previousPath = process.env.PATH;
-      const previousOutput = process.env.T3_FAKE_CODEX_OUTPUT_B64;
+      const previousOutputFile = process.env.T3_FAKE_CODEX_OUTPUT_FILE;
       const previousExitCode = process.env.T3_FAKE_CODEX_EXIT_CODE;
       const previousStderr = process.env.T3_FAKE_CODEX_STDERR;
       const previousRequireImage = process.env.T3_FAKE_CODEX_REQUIRE_IMAGE;
       const previousStdinMustContain = process.env.T3_FAKE_CODEX_STDIN_MUST_CONTAIN;
       const previousStdinMustNotContain = process.env.T3_FAKE_CODEX_STDIN_MUST_NOT_CONTAIN;
 
+      yield* fs.writeFileString(outputFixturePath, input.output);
+
       yield* Effect.sync(() => {
         process.env.PATH = `${binDir}:${previousPath ?? ""}`;
-        process.env.T3_FAKE_CODEX_OUTPUT_B64 = Buffer.from(input.output, "utf8").toString("base64");
+        process.env.T3_FAKE_CODEX_OUTPUT_FILE = outputFixturePath;
 
         if (input.exitCode !== undefined) {
           process.env.T3_FAKE_CODEX_EXIT_CODE = String(input.exitCode);
@@ -134,7 +141,7 @@ function withFakeCodexEnv<A, E, R>(
 
       return {
         previousPath,
-        previousOutput,
+        previousOutputFile,
         previousExitCode,
         previousStderr,
         previousRequireImage,
@@ -147,10 +154,10 @@ function withFakeCodexEnv<A, E, R>(
       Effect.sync(() => {
         process.env.PATH = previous.previousPath;
 
-        if (previous.previousOutput === undefined) {
-          delete process.env.T3_FAKE_CODEX_OUTPUT_B64;
+        if (previous.previousOutputFile === undefined) {
+          delete process.env.T3_FAKE_CODEX_OUTPUT_FILE;
         } else {
-          process.env.T3_FAKE_CODEX_OUTPUT_B64 = previous.previousOutput;
+          process.env.T3_FAKE_CODEX_OUTPUT_FILE = previous.previousOutputFile;
         }
 
         if (previous.previousExitCode === undefined) {

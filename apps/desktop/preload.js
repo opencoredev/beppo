@@ -8,7 +8,9 @@
   var menuActionListeners = new Set();
   var updateStateListeners = new Set();
   var currentUrl = new URL(window.location.href);
-  var wsUrl = currentUrl.searchParams.get("t3DesktopWsUrl");
+  var wsUrl =
+    currentUrl.searchParams.get("beppoDesktopWsUrl") ||
+    currentUrl.searchParams.get("t3DesktopWsUrl");
 
   function postMessage(payload) {
     if (!window.__electrobunBunBridge || typeof window.__electrobunBunBridge.postMessage !== "function") {

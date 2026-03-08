@@ -1,16 +1,16 @@
 export const BRAND_ASSET_PATHS = {
-  productionMacIconPng: "assets/prod/black-macos-1024.png",
-  productionLinuxIconPng: "assets/prod/black-universal-1024.png",
-  productionWindowsIconIco: "assets/prod/t3-black-windows.ico",
-  productionWebFaviconIco: "assets/prod/t3-black-web-favicon.ico",
-  productionWebFavicon16Png: "assets/prod/t3-black-web-favicon-16x16.png",
-  productionWebFavicon32Png: "assets/prod/t3-black-web-favicon-32x32.png",
-  productionWebAppleTouchIconPng: "assets/prod/t3-black-web-apple-touch-180.png",
-  developmentWindowsIconIco: "assets/dev/blueprint-windows.ico",
-  developmentWebFaviconIco: "assets/dev/blueprint-web-favicon.ico",
-  developmentWebFavicon16Png: "assets/dev/blueprint-web-favicon-16x16.png",
-  developmentWebFavicon32Png: "assets/dev/blueprint-web-favicon-32x32.png",
-  developmentWebAppleTouchIconPng: "assets/dev/blueprint-web-apple-touch-180.png",
+  productionMacIconPng: "apps/desktop/resources/icon.png",
+  productionLinuxIconPng: "apps/desktop/resources/icon.png",
+  productionWindowsIconIco: "apps/desktop/resources/icon.ico",
+  productionWebFaviconIco: "apps/web/public/favicon.ico",
+  productionWebFavicon16Png: "apps/web/public/favicon-16x16.png",
+  productionWebFavicon32Png: "apps/web/public/favicon-32x32.png",
+  productionWebAppleTouchIconPng: "apps/web/public/apple-touch-icon.png",
+  developmentWindowsIconIco: "apps/desktop/resources/icon.ico",
+  developmentWebFaviconIco: "apps/web/public/favicon.ico",
+  developmentWebFavicon16Png: "apps/web/public/favicon-16x16.png",
+  developmentWebFavicon32Png: "apps/web/public/favicon-32x32.png",
+  developmentWebAppleTouchIconPng: "apps/web/public/apple-touch-icon.png",
 } as const;
 
 export interface IconOverride {

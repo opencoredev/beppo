@@ -31,6 +31,10 @@
     "./archive": {
       "types": "./src/archive.ts",
       "import": "./src/archive.ts"
+    },
+    "./branding": {
+      "types": "./src/branding.ts",
+      "import": "./src/branding.ts"
     }
   },
   "scripts": {

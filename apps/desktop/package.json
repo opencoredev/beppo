@@ -6,7 +6,7 @@
     "dev": "bunx --bun electrobun dev --watch",
     "build": "bunx --bun electrobun build",
     "start": "bunx --bun electrobun run",
-    "package": "bunx --bun electrobun build stable",
+    "package": "bunx --bun electrobun build --env=stable",
     "typecheck": "tsc --noEmit",
     "test": "bunx --bun vitest run --passWithNoTests",
     "smoke-test": "node scripts/smoke-test.mjs"

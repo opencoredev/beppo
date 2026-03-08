@@ -38,6 +38,7 @@ import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
 import { type DraftThreadEnvMode, useComposerDraftStore } from "../composerDraftStore";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
+import { getDesktopWsUrl, resolveHttpOriginFromWsUrl } from "../desktopRuntime";
 import { toastManager } from "./ui/toast";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
@@ -230,21 +231,12 @@ function prStatusIndicator(pr: ThreadPr): PrStatusIndicator | null {
  * sources WsTransport uses, converting ws(s) to http(s).
  */
 function getServerHttpOrigin(): string {
-  const bridgeUrl = window.desktopBridge?.getWsUrl();
   const envUrl = import.meta.env.VITE_WS_URL as string | undefined;
   const wsUrl =
-    bridgeUrl && bridgeUrl.length > 0
-      ? bridgeUrl
-      : envUrl && envUrl.length > 0
-        ? envUrl
-        : `ws://${window.location.hostname}:${window.location.port}`;
-  // Parse to extract just the origin, dropping path/query (e.g. ?token=…)
-  const httpUrl = wsUrl.replace(/^wss:/, "https:").replace(/^ws:/, "http:");
-  try {
-    return new URL(httpUrl).origin;
-  } catch {
-    return httpUrl;
-  }
+    getDesktopWsUrl() ??
+    (envUrl && envUrl.length > 0 ? envUrl : `ws://${window.location.hostname}:${window.location.port}`);
+
+  return resolveHttpOriginFromWsUrl(wsUrl);
 }
 
 const serverHttpOrigin = getServerHttpOrigin();

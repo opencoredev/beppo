@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { APP_STORAGE_PREFIX, LEGACY_APP_STORAGE_PREFIX } from "@t3tools/shared/branding";
 
 type Theme = "light" | "dark" | "system";
 type ThemeSnapshot = {
@@ -6,7 +7,8 @@ type ThemeSnapshot = {
   systemDark: boolean;
 };
 
-const STORAGE_KEY = "t3code:theme";
+const STORAGE_KEY = `${APP_STORAGE_PREFIX}:theme`;
+const LEGACY_STORAGE_KEY = `${LEGACY_APP_STORAGE_PREFIX}:theme`;
 const MEDIA_QUERY = "(prefers-color-scheme: dark)";
 
 let listeners: Array<() => void> = [];
@@ -21,7 +23,11 @@ function getSystemDark(): boolean {
 
 function getStored(): Theme {
   const raw = localStorage.getItem(STORAGE_KEY);
-  if (raw === "light" || raw === "dark" || raw === "system") return raw;
+  const legacyRaw = raw === null ? localStorage.getItem(LEGACY_STORAGE_KEY) : null;
+  const resolvedRaw = raw ?? legacyRaw;
+  if (resolvedRaw === "light" || resolvedRaw === "dark" || resolvedRaw === "system") {
+    return resolvedRaw;
+  }
   return "system";
 }
 
@@ -69,7 +75,7 @@ function subscribe(listener: () => void): () => void {
 
   // Listen for storage changes from other tabs
   const handleStorage = (e: StorageEvent) => {
-    if (e.key === STORAGE_KEY) {
+    if (e.key === STORAGE_KEY || e.key === LEGACY_STORAGE_KEY) {
       applyTheme(getStored(), true);
       emitChange();
     }
@@ -92,6 +98,7 @@ export function useTheme() {
 
   const setTheme = useCallback((next: Theme) => {
     localStorage.setItem(STORAGE_KEY, next);
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
     applyTheme(next, true);
     emitChange();
   }, []);

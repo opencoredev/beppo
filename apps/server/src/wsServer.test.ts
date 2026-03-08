@@ -365,6 +365,21 @@ function expectAvailableEditors(value: unknown): void {
   }
 }
 
+async function closeClientSocket(ws: WebSocket): Promise<void> {
+  if (ws.readyState === WebSocket.CLOSED) {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    const timeout = setTimeout(resolve, 1_000);
+    ws.once("close", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    ws.close();
+  });
+}
+
 describe("WebSocket Server", () => {
   let server: Http.Server | null = null;
   let serverScope: Scope.Closeable | null = null;
@@ -476,7 +491,7 @@ describe("WebSocket Server", () => {
 
   afterEach(async () => {
     for (const ws of connections) {
-      ws.close();
+      await closeClientSocket(ws);
     }
     connections.length = 0;
     await closeTestServer();
@@ -485,7 +500,7 @@ describe("WebSocket Server", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
     vi.restoreAllMocks();
-  });
+  }, 30_000);
 
   it("sends welcome message on connect", async () => {
     server = await createTestServer({ cwd: "/test/project" });
@@ -676,7 +691,7 @@ describe("WebSocket Server", () => {
     expect(firstBootstrapProjectId).toBeDefined();
     expect(firstBootstrapThreadId).toBeDefined();
 
-    firstWs.close();
+    await closeClientSocket(firstWs);
     await closeTestServer();
     server = null;
 

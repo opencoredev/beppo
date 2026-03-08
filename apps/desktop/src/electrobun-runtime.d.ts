@@ -11,6 +11,7 @@ export const BrowserWindow: {
     };
     setTitle: (title: string) => void;
     focus: () => void;
+    show: () => void;
   };
 };
 

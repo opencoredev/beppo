@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 
 import { execFile } from "node:child_process";
+import { rmSync } from "node:fs";
 import { homedir } from "node:os";
+import * as NodePath from "node:path";
 import { promisify } from "node:util";
 import * as OS from "node:os";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NetService } from "@t3tools/shared/Net";
+import { APP_HIDDEN_DIR } from "@t3tools/shared/branding";
 import { Config, Data, Effect, Hash, Layer, Logger, Option, Path, Schema } from "effect";
 import { Argument, Command, Flag } from "effect/unstable/cli";
 import { ChildProcess } from "effect/unstable/process";
@@ -48,7 +51,7 @@ const LINUX_WSL_CEF_DEPENDENCIES = [
 const execFileAsync = promisify(execFile);
 
 export const DEFAULT_DEV_STATE_DIR = Effect.map(Effect.service(Path.Path), (path) =>
-  path.join(homedir(), ".t3", "dev"),
+  path.join(homedir(), APP_HIDDEN_DIR, "dev"),
 );
 
 const MODE_ARGS = {
@@ -63,7 +66,14 @@ const MODE_ARGS = {
   ],
   "dev:server": ["run", "dev", "--filter=t3"],
   "dev:web": ["run", "dev", "--filter=@t3tools/web"],
-  "dev:desktop": ["run", "dev", "--filter=@t3tools/desktop", "--filter=@t3tools/web", "--parallel"],
+  "dev:desktop": [
+    "run",
+    "dev",
+    "--filter=@t3tools/desktop",
+    "--filter=@t3tools/web",
+    "--filter=t3",
+    "--parallel",
+  ],
 } as const satisfies Record<string, ReadonlyArray<string>>;
 
 type DevMode = keyof typeof MODE_ARGS;
@@ -111,6 +121,54 @@ function ensureLinuxDesktopDependencies(mode: DevMode): Effect.Effect<void, DevR
           cause instanceof Error
             ? cause.message
             : "Desktop dev preflight failed while checking Linux shared library dependencies.",
+        cause,
+      }),
+  });
+}
+
+function cleanupDesktopDevArtifactsAndProcesses(
+  mode: DevMode,
+): Effect.Effect<void, DevRunnerError> {
+  if (mode !== "dev:desktop" || process.platform === "win32") {
+    return Effect.void;
+  }
+
+  return Effect.tryPromise({
+    try: async () => {
+      const patterns = [
+        `${NodePath.join(process.cwd(), "apps/desktop/node_modules/.bin/electrobun")} dev --watch`,
+        "Beppo-dev.app/Contents/MacOS",
+      ];
+
+      for (const pattern of patterns) {
+        try {
+          await execFileAsync("pkill", ["-f", pattern]);
+        } catch (error) {
+          const exitCode =
+            typeof error === "object" &&
+            error !== null &&
+            "code" in error &&
+            typeof (error as { code?: unknown }).code === "number"
+              ? (error as { code: number }).code
+              : undefined;
+          if (exitCode !== 1) {
+            throw error;
+          }
+        }
+      }
+
+      rmSync(NodePath.join(process.cwd(), "apps/desktop/build"), { recursive: true, force: true });
+      rmSync(NodePath.join(process.cwd(), "apps/desktop/artifacts"), {
+        recursive: true,
+        force: true,
+      });
+    },
+    catch: (cause) =>
+      new DevRunnerError({
+        message:
+          cause instanceof Error
+            ? cause.message
+            : "Desktop dev preflight failed while cleaning stale Electrobun state.",
         cause,
       }),
   });
@@ -267,6 +325,11 @@ export function createDevRunnerEnv({
 
     if (mode === "dev:server" || mode === "dev:web") {
       output.T3CODE_MODE = "web";
+      delete output.T3CODE_DESKTOP_WS_URL;
+    }
+
+    if (mode === "dev:desktop") {
+      output.T3CODE_NO_BROWSER = "1";
       delete output.T3CODE_DESKTOP_WS_URL;
     }
 
@@ -452,6 +515,7 @@ const resolveOptionalBooleanOverride = (
 export function runDevRunnerWithInput(input: DevRunnerCliInput) {
   return Effect.gen(function* () {
     yield* ensureLinuxDesktopDependencies(input.mode);
+    yield* cleanupDesktopDevArtifactsAndProcesses(input.mode);
 
     const { portOffset, devInstance } = yield* OffsetConfig.asEffect().pipe(
       Effect.mapError(
@@ -508,6 +572,26 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       devUrl: input.devUrl,
     });
 
+    const runTurboCommand = (args: ReadonlyArray<string>) =>
+      Effect.gen(function* () {
+        const child = yield* ChildProcess.make(TURBO_COMMAND, ["run", "turbo", ...args], {
+          stdin: "inherit",
+          stdout: "inherit",
+          stderr: "inherit",
+          env,
+          extendEnv: false,
+          detached: false,
+          forceKillAfter: "1500 millis",
+        });
+
+        const exitCode = yield* child.exitCode;
+        if (exitCode !== 0) {
+          return yield* new DevRunnerError({
+            message: `turbo exited with code ${exitCode}`,
+          });
+        }
+      });
+
     const selectionSuffix =
       serverOffset !== offset || webOffset !== offset
         ? ` selectedOffset(server=${serverOffset},web=${webOffset})`
@@ -521,29 +605,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       return;
     }
 
-    const child = yield* ChildProcess.make(
-      TURBO_COMMAND,
-      ["run", "turbo", ...MODE_ARGS[input.mode], ...input.turboArgs],
-      {
-        stdin: "inherit",
-        stdout: "inherit",
-        stderr: "inherit",
-        env,
-        extendEnv: false,
-        // Keep turbo in the same process group so terminal signals (Ctrl+C)
-        // reach it directly. Effect defaults to detached: true on non-Windows,
-        // which would put turbo in a new group and require manual forwarding.
-        detached: false,
-        forceKillAfter: "1500 millis",
-      },
-    );
-
-    const exitCode = yield* child.exitCode;
-    if (exitCode !== 0) {
-      return yield* new DevRunnerError({
-        message: `turbo exited with code ${exitCode}`,
-      });
-    }
+    yield* runTurboCommand([...MODE_ARGS[input.mode], ...input.turboArgs]);
   }).pipe(
     Effect.mapError((cause) =>
       cause instanceof DevRunnerError
