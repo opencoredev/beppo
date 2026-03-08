@@ -3,21 +3,24 @@ const githubUrl = "https://github.com/opencoredev/beppo";
 const releaseUrl = "https://github.com/opencoredev/beppo/releases";
 const discordUrl = "https://discord.gg/jn4EGJjrvv";
 
-const features = [
+const notes = [
+  "Desktop-first workflow",
+  "Codex-first sessions",
+  "Forked and rebranded as Beppo",
+];
+
+const details = [
   {
-    icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M12 6v6l4 2"/></svg>`,
-    title: "Resilient sessions",
-    body: "Threads survive restarts. Reconnects happen invisibly. Your workflow stays unbroken even when the provider stumbles.",
+    title: "Cleaner sessions",
+    body: "Keep agent work readable while turns stream, reconnect, and recover.",
   },
   {
-    icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>`,
     title: "One focused surface",
-    body: "Desktop depth when you're heads-down. Web access when you need to monitor. Same interface, no context switch.",
+    body: "Desktop depth with web visibility, without making the product feel busy.",
   },
   {
-    icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12"/><path d="M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>`,
     title: "Built to evolve",
-    body: "Its own product voice, its own visual language, and room to grow. An opinionated workspace, not a thin wrapper.",
+    body: "A strong fork with room for its own product voice, visuals, and workflow ideas.",
   },
 ];
 ---
@@ -28,741 +31,589 @@ const features = [
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Beppo — A calmer way to code with AI. Desktop-first workspace for running code agents with cleaner sessions and better visibility."
+      content="Beppo is a desktop-first AI coding workspace with calmer sessions, cleaner branching, and a sharper interface for serious agent work."
     />
-    <meta property="og:title" content="Beppo — The best way to code with AI" />
-    <meta
-      property="og:description"
-      content="A desktop-first workspace for running code agents with cleaner sessions and better visibility."
-    />
-    <meta property="og:image" content="/beppo-social-img.png" />
-    <meta property="og:type" content="website" />
-    <meta name="twitter:card" content="summary_large_image" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
       rel="stylesheet"
-    />
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist@5/index.min.css"
     />
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" type="image/png" href="/favicon-32x32.png" sizes="32x32" />
     <link rel="icon" type="image/png" href="/favicon-16x16.png" sizes="16x16" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <title>Beppo — The best way to code with AI</title>
+    <title>Beppo</title>
   </head>
-
   <body>
     <div class="page">
-
-      <!-- ── Navbar ──────────────────────────────────────── -->
-      <header class="nav-wrap">
-        <nav class="nav">
-          <a href="/" class="nav-brand">
-            <img src="/icon.jpg" alt="" width="28" height="28" class="nav-icon" />
-            <span>Beppo</span>
+      <nav class="nav">
+        <a href="/" class="nav-brand" aria-label="Beppo home">
+          <img src="/icon.jpg" alt="Beppo" class="nav-icon" />
+          <span class="nav-wordmark">Beppo</span>
+        </a>
+        <div class="nav-links">
+          <a href={githubUrl} target="_blank" rel="noopener noreferrer" class="nav-link">GitHub</a>
+          <a href={releaseUrl} target="_blank" rel="noopener noreferrer" class="nav-link nav-link-cta">
+            Download
+            <span class="nav-github-arrow" aria-hidden="true">&#8599;</span>
           </a>
-          <div class="nav-end">
-            <a href={discordUrl} class="nav-link" target="_blank" rel="noopener">Discord</a>
-            <a href={githubUrl} class="nav-link" target="_blank" rel="noopener">GitHub</a>
-            <a href={releaseUrl} class="nav-cta" target="_blank" rel="noopener">
-              Download
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17l9.2-9.2M17 17V7H7"/></svg>
-            </a>
-          </div>
-        </nav>
-      </header>
+        </div>
+      </nav>
 
-      <main>
+      <main class="main">
+        <div class="hero-intro">
+          <div class="hero-pill">Rebranded from a fork into Beppo</div>
+          <h1 class="tagline">Beppo is a calmer way to code with AI.</h1>
+          <p class="subtagline">
+            A desktop-first workspace for running code agents with clearer sessions, cleaner
+            branching, and a UI that feels focused instead of loud.
+          </p>
+        </div>
 
-        <!-- ── Hero — two-column ──────────────────────────── -->
-        <section class="hero">
-          <div class="hero-content">
-            <div class="hero-text">
-              <span class="badge">
-                <span class="badge-dot" aria-hidden="true"></span>
-                Open Source AI Coding Web GUI
-              </span>
+        <div class="note-row" aria-label="Beppo highlights">
+          {notes.map((note) => <span class="note-chip">{note}</span>)}
+        </div>
 
-              <h1 class="hero-title">Beppo</h1>
+        <div class="hero-actions">
+          <a href={releaseUrl} target="_blank" rel="noopener noreferrer" class="hero-button">
+            Download now
+          </a>
+          <a href={githubUrl} target="_blank" rel="noopener noreferrer" class="hero-secondary">
+            View source
+          </a>
+        </div>
 
-              <p class="hero-tagline">The best way to code with AI.</p>
-
-              <p class="hero-desc">
-                A desktop-first workspace for running code agents with cleaner
-                sessions, predictable branching, and a UI that stays out of your way.
-              </p>
-
-              <div class="hero-actions">
-                <a href={releaseUrl} class="btn btn-primary" target="_blank" rel="noopener">
-                  Get Started
-                </a>
-                <a href={githubUrl} class="btn btn-ghost" target="_blank" rel="noopener">
-                  View on GitHub
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-                </a>
-              </div>
-
-              <div class="trust-row">
-                <span>Open source</span>
-                <span class="trust-sep" aria-hidden="true">·</span>
-                <span>Codex-powered</span>
-                <span class="trust-sep" aria-hidden="true">·</span>
-                <span>MIT Licensed</span>
-              </div>
+        <div class="screenshot-wrap">
+          <div class="screenshot-shell">
+            <div class="screenshot-bar">
+              <span></span>
+              <span></span>
+              <span></span>
             </div>
-
-            <div class="hero-visual">
-              <div class="hero-glow" aria-hidden="true"></div>
-              <img
-                src="/beppo-hero-otter.png"
-                alt="Beppo mascot — a cheerful otter surfing a wave"
-                width="1536"
-                height="1024"
-                class="hero-art"
-                loading="eager"
-                fetchpriority="high"
-              />
-            </div>
+            <img src="/screenshot.jpeg" alt="Beppo" class="screenshot" />
           </div>
+        </div>
+
+        <section class="details" aria-label="What Beppo is for">
+          {details.map((detail) => (
+            <article class="detail-card">
+              <h2>{detail.title}</h2>
+              <p>{detail.body}</p>
+            </article>
+          ))}
         </section>
-
-        <!-- ── Product Screenshot ─────────────────────────── -->
-        <section class="showcase">
-          <div class="window">
-            <div class="window-bar">
-              <div class="window-dots">
-                <span></span><span></span><span></span>
-              </div>
-              <span class="window-title">Beppo</span>
-              <div class="window-dots" style="visibility:hidden;">
-                <span></span><span></span><span></span>
-              </div>
-            </div>
-            <div class="window-body">
-              <img
-                src="/screenshot.jpeg"
-                alt="Beppo interface showing a coding session with AI agent"
-                width="2764"
-                height="1712"
-                class="window-img"
-                loading="lazy"
-              />
-            </div>
-          </div>
-        </section>
-
-        <!-- ── Features ───────────────────────────────────── -->
-        <section class="features">
-          <div class="features-header">
-            <h2 class="section-title">Built for real work</h2>
-            <p class="section-desc">
-              Not another chat wrapper. Beppo is a dedicated workspace for AI-assisted coding.
-            </p>
-          </div>
-          <div class="features-grid">
-            {features.map((f) => (
-              <article class="card">
-                <div class="card-icon" set:html={f.icon} />
-                <h3>{f.title}</h3>
-                <p>{f.body}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <!-- ── Bottom CTA ─────────────────────────────────── -->
-        <section class="bottom-cta">
-          <h2>Ready to try Beppo?</h2>
-          <p>Download the latest release or browse the source on GitHub.</p>
-          <div class="bottom-cta-actions">
-            <a href={releaseUrl} class="btn btn-primary" target="_blank" rel="noopener">Download now</a>
-            <a href={githubUrl} class="btn btn-ghost" target="_blank" rel="noopener">GitHub</a>
-            <a href={discordUrl} class="btn btn-ghost" target="_blank" rel="noopener">Discord</a>
-          </div>
-        </section>
-
       </main>
 
-      <!-- ── Footer ─────────────────────────────────────── -->
       <footer class="footer">
-        <span class="footer-left">&copy; 2025 T3 Tools Inc.</span>
+        <div class="footer-brand">
+          <img src="/full-logo.png" alt="Beppo" class="footer-logo" />
+          <span class="footer-copy">&copy; {new Date().getFullYear()} T3 Tools Inc</span>
+        </div>
         <div class="footer-links">
-          <a href={githubUrl} target="_blank" rel="noopener">GitHub</a>
-          <a href={releaseUrl} target="_blank" rel="noopener">Releases</a>
-          <a href={discordUrl} target="_blank" rel="noopener">Discord</a>
+          <a href={githubUrl} target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a href={releaseUrl} target="_blank" rel="noopener noreferrer">Releases</a>
+          <a href={discordUrl} target="_blank" rel="noopener noreferrer">Discord</a>
         </div>
       </footer>
-
     </div>
   </body>
 </html>
 
-<style is:global>
-  /* ────────────────────────────────────────────────────── */
-  /*  Design tokens — synced with desktop app dark theme   */
-  /* ────────────────────────────────────────────────────── */
+<style>
   :root {
-    --bg:         #0a0a0a;
-    --bg-subtle:  #161616;
-    --fg:         #f5f5f5;
-    --fg-muted:   #a3a3a3;
-    --fg-dim:     #737373;
-    --primary:    oklch(0.588 0.217 264);
-    --primary-fg: #fff;
-    --border:     rgba(255, 255, 255, 0.06);
-    --border-hover: rgba(255, 255, 255, 0.12);
-    --surface:    rgba(255, 255, 255, 0.04);
-    --radius:     0.625rem;
-    --max-w:      1200px;
-    --font-sans:  "Geist Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
-    --font-brand: "Space Grotesk", "Geist Variable", sans-serif;
+    --background: color-mix(in srgb, var(--color-neutral-950, #0a0a0a) 95%, white);
+    --foreground: #f5f7fb;
+    --card: rgba(255, 255, 255, 0.04);
+    --card-foreground: #f5f7fb;
+    --primary: oklch(0.588 0.217 264);
+    --primary-foreground: #ffffff;
+    --secondary: rgba(255, 255, 255, 0.05);
+    --muted: rgba(255, 255, 255, 0.04);
+    --muted-foreground: rgba(229, 236, 246, 0.68);
+    --accent: rgba(255, 255, 255, 0.04);
+    --border: rgba(255, 255, 255, 0.08);
+    --ring: oklch(0.588 0.217 264);
+    --shadow-soft: 0 26px 90px color-mix(in srgb, var(--primary) 18%, transparent);
+    --shadow-card: 0 18px 42px rgba(0, 0, 0, 0.34);
   }
 
-  /* ────────────────────────────────────────────────────── */
-  /*  Reset                                                */
-  /* ────────────────────────────────────────────────────── */
-  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    color-scheme: dark;
+    scroll-behavior: smooth;
+  }
 
   body {
-    font-family: var(--font-sans);
-    background: var(--bg);
-    color: var(--fg);
+    background:
+      radial-gradient(circle at top center, color-mix(in srgb, var(--primary) 18%, transparent) 0%, transparent 34%),
+      radial-gradient(circle at top right, rgba(56, 189, 248, 0.12) 0%, transparent 26%),
+      linear-gradient(180deg, #090b11 0%, #0d1119 48%, #090c12 100%);
+    color: var(--foreground);
+    font-family: "Geist", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    overflow-x: hidden;
-    line-height: 1.6;
-  }
-
-  a { color: inherit; text-decoration: none; }
-  img { display: block; max-width: 100%; height: auto; }
-  :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-
-  /* ────────────────────────────────────────────────────── */
-  /*  Page wrapper & ambient background                    */
-  /* ────────────────────────────────────────────────────── */
-  .page {
-    position: relative;
     min-height: 100vh;
+    overflow-x: hidden;
   }
 
-  /* Subtle dot grid */
-  .page::before {
+  body::after {
     content: "";
     position: fixed;
     inset: 0;
-    background-image: radial-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px);
-    background-size: 24px 24px;
     pointer-events: none;
-    z-index: 0;
+    opacity: 0.03;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-repeat: repeat;
+    background-size: 256px 256px;
+    z-index: 9999;
   }
 
-  /* ────────────────────────────────────────────────────── */
-  /*  Navbar                                               */
-  /* ────────────────────────────────────────────────────── */
-  .nav-wrap {
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    backdrop-filter: blur(12px) saturate(1.6);
-    -webkit-backdrop-filter: blur(12px) saturate(1.6);
-    background: rgba(9, 9, 11, 0.8);
-    border-bottom: 1px solid var(--border);
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  img {
+    display: block;
+    max-width: 100%;
+  }
+
+  .page {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
   }
 
   .nav {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    max-width: var(--max-w);
-    margin: 0 auto;
-    padding: 0.85rem 2rem;
+    gap: 1rem;
+    padding: 1.25rem 2.5rem;
   }
 
   .nav-brand {
     display: flex;
     align-items: center;
-    gap: 0.55rem;
-    font-family: var(--font-brand);
-    font-weight: 600;
-    font-size: 0.95rem;
-    letter-spacing: -0.01em;
-    transition: opacity 0.15s;
-    cursor: pointer;
+    gap: 0.75rem;
   }
-  .nav-brand:hover { opacity: 0.75; }
 
   .nav-icon {
-    width: 28px;
-    height: 28px;
-    border-radius: 7px;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 12px 28px color-mix(in srgb, var(--primary) 26%, transparent);
   }
 
-  .nav-end {
+  .nav-wordmark {
+    font-size: 0.98rem;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+  }
+
+  .nav-links {
     display: flex;
     align-items: center;
-    gap: 1.5rem;
+    gap: 0.5rem;
   }
 
   .nav-link {
-    color: var(--fg-muted);
-    font-size: 0.85rem;
-    font-weight: 500;
-    transition: color 0.15s;
-    cursor: pointer;
-  }
-  .nav-link:hover { color: var(--fg); }
-
-  .nav-cta {
+    min-height: 44px;
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
-    padding: 0.4rem 0.95rem;
-    background: var(--fg);
-    color: var(--bg);
-    border-radius: 8px;
-    font-size: 0.83rem;
-    font-weight: 600;
-    transition: opacity 0.15s;
-    cursor: pointer;
-  }
-  .nav-cta:hover { opacity: 0.85; }
-
-  /* ────────────────────────────────────────────────────── */
-  /*  Hero                                                 */
-  /* ────────────────────────────────────────────────────── */
-  .hero {
-    position: relative;
-    z-index: 1;
-    overflow: hidden;
+    gap: 0.35rem;
+    padding: 0 0.95rem;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    color: var(--muted-foreground);
+    font-size: 0.9rem;
+    transition:
+      color 0.2s ease,
+      background-color 0.2s ease,
+      border-color 0.2s ease,
+      transform 0.2s ease;
   }
 
-  .hero-content {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    align-items: center;
-    gap: 2rem;
-    max-width: var(--max-w);
-    margin: 0 auto;
-    padding: clamp(3rem, 8vh, 6rem) 2rem clamp(2rem, 5vh, 4rem);
+  .nav-link:hover,
+  .nav-link:focus-visible {
+    color: var(--foreground);
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    border-color: color-mix(in srgb, var(--primary) 24%, transparent);
+    outline: none;
   }
 
-  /* ── Left column: text ── */
-  .hero-text {
+  .nav-link-cta {
+    color: var(--primary);
+    border-color: color-mix(in srgb, var(--primary) 24%, transparent);
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+  }
+
+  .nav-github-arrow {
+    display: inline-block;
+    transition: transform 0.2s ease;
+  }
+
+  .nav-link-cta:hover .nav-github-arrow,
+  .nav-link-cta:focus-visible .nav-github-arrow {
+    transform: translateX(2px) translateY(-1px);
+  }
+
+  .main {
+    flex: 1;
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
+    align-items: center;
+    padding: 3vh 1.5rem 0;
   }
 
-  .badge {
+  .hero-intro {
+    max-width: 56rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .hero-pill {
+    min-height: 36px;
     display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.3rem 0.9rem;
-    background: var(--surface);
-    border: 1px solid var(--border);
+    justify-content: center;
+    padding: 0 0.9rem;
+    border: 1px solid color-mix(in srgb, var(--primary) 22%, transparent);
     border-radius: 999px;
-    font-size: 0.76rem;
-    font-weight: 500;
-    color: var(--fg-muted);
+    background: color-mix(in srgb, var(--primary) 11%, transparent);
+    color: var(--primary);
+    font-size: 0.78rem;
+    font-weight: 600;
     letter-spacing: 0.01em;
-    margin-bottom: 1.5rem;
+    margin-bottom: 0.9rem;
   }
 
-  .badge-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #22c55e;
-    box-shadow: 0 0 6px rgba(34, 197, 94, 0.4);
+  .tagline {
+    font-weight: 600;
+    font-size: clamp(2.5rem, 5.3vw, 4rem);
+    letter-spacing: -0.055em;
+    line-height: 1.02;
+    margin: 0 0 0.85rem;
+    opacity: 0;
+    animation: fade-in 0.9s ease-out forwards;
   }
 
-  .hero-title {
-    font-family: var(--font-brand);
-    font-size: clamp(3.2rem, 5.5vw, 5rem);
-    font-weight: 700;
-    letter-spacing: -0.04em;
-    line-height: 0.95;
-    margin-bottom: 0.75rem;
+  .subtagline {
+    max-width: 38rem;
+    color: var(--muted-foreground);
+    font-size: clamp(1rem, 2vw, 1.125rem);
+    line-height: 1.65;
+    opacity: 0;
+    animation: fade-in 0.9s ease-out 0.08s forwards;
   }
 
-  .hero-tagline {
-    font-size: clamp(1.1rem, 1.8vw, 1.35rem);
-    font-weight: 500;
-    letter-spacing: -0.02em;
-    line-height: 1.35;
-    color: var(--fg-muted);
-    margin-bottom: 1.25rem;
+  .note-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.75rem;
+    margin: 1.25rem 0 0;
+    opacity: 0;
+    animation: fade-in 0.9s ease-out 0.14s forwards;
   }
 
-  .hero-desc {
-    font-size: 0.95rem;
-    line-height: 1.7;
-    color: var(--fg-dim);
-    max-width: 440px;
-    margin-bottom: 2rem;
+  .note-chip {
+    min-height: 38px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 0.95rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--foreground);
+    font-size: 0.875rem;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
   }
 
   .hero-actions {
     display: flex;
     align-items: center;
-    gap: 0.7rem;
-    flex-wrap: wrap;
-    margin-bottom: 1.75rem;
-  }
-
-  .trust-row {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.78rem;
-    color: var(--fg-dim);
-  }
-  .trust-sep { opacity: 0.35; }
-
-  /* ── Right column: mascot ── */
-  .hero-visual {
-    position: relative;
-    display: flex;
     justify-content: center;
-    align-items: center;
+    gap: 0.85rem;
+    flex-wrap: wrap;
+    margin: 1rem 0 1.1rem;
+    opacity: 0;
+    animation: fade-in 0.9s ease-out 0.2s forwards;
   }
 
-  .hero-glow {
-    position: absolute;
-    width: 120%;
-    height: 120%;
-    top: -10%;
-    left: -10%;
-    background: radial-gradient(
-      ellipse at 60% 55%,
-      rgba(59, 130, 246, 0.06),
-      rgba(14, 165, 233, 0.03) 40%,
-      transparent 70%
-    );
-    filter: blur(40px);
-    pointer-events: none;
-  }
-
-  .hero-art {
-    position: relative;
-    width: 115%;
-    max-width: 640px;
-    height: auto;
-    object-fit: contain;
-    transform: translateX(8%);
-    filter: drop-shadow(0 8px 32px rgba(0, 0, 0, 0.3));
-  }
-
-  /* ────────────────────────────────────────────────────── */
-  /*  Buttons                                              */
-  /* ────────────────────────────────────────────────────── */
-  .btn {
+  .hero-button,
+  .hero-secondary {
+    min-height: 48px;
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
-    padding: 0.65rem 1.4rem;
-    border-radius: var(--radius);
-    font-size: 0.88rem;
+    justify-content: center;
+    padding: 0 1.25rem;
+    border-radius: 999px;
+    font-size: 0.95rem;
     font-weight: 600;
-    text-decoration: none;
-    transition: all 0.15s ease;
-    cursor: pointer;
-    border: none;
-    font-family: inherit;
+    transition:
+      transform 0.2s ease,
+      box-shadow 0.2s ease,
+      border-color 0.2s ease,
+      background-color 0.2s ease;
   }
 
-  .btn-primary {
-    background: var(--fg);
-    color: var(--bg);
+  .hero-button {
+    background: var(--primary);
+    color: var(--primary-foreground);
+    box-shadow: 0 18px 36px color-mix(in srgb, var(--primary) 28%, transparent);
   }
-  .btn-primary:hover {
-    opacity: 0.88;
+
+  .hero-button:hover,
+  .hero-button:focus-visible,
+  .hero-secondary:hover,
+  .hero-secondary:focus-visible {
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(250, 250, 250, 0.1);
+    outline: none;
   }
 
-  .btn-ghost {
-    background: transparent;
-    color: var(--fg-muted);
+  .hero-secondary {
     border: 1px solid var(--border);
-  }
-  .btn-ghost:hover {
-    color: var(--fg);
-    border-color: var(--border-hover);
-    background: var(--surface);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--foreground);
   }
 
-  /* ────────────────────────────────────────────────────── */
-  /*  Product screenshot                                   */
-  /* ────────────────────────────────────────────────────── */
-  .showcase {
-    position: relative;
-    z-index: 1;
-    max-width: 1100px;
+  .hero-secondary:hover,
+  .hero-secondary:focus-visible {
+    border-color: color-mix(in srgb, var(--primary) 26%, transparent);
+    background: color-mix(in srgb, var(--primary) 10%, transparent);
+  }
+
+  .screenshot-wrap {
     margin: 0 auto;
-    padding: 0 2rem;
+    width: min(95vw, 1320px);
+    opacity: 0;
+    transform: scale(0.985);
+    animation: screenshot-in 1s ease-out 0.24s forwards;
   }
 
-  .window {
-    position: relative;
-    border-radius: 12px;
-    border: 1px solid var(--border);
-    background: var(--bg-subtle);
-    overflow: hidden;
-    box-shadow:
-      0 0 0 1px rgba(255, 255, 255, 0.02),
-      0 24px 48px -12px rgba(0, 0, 0, 0.5);
+  .screenshot-shell {
+    padding: 0.9rem 0.9rem 0;
+    border-radius: 24px;
+    border: 1px solid color-mix(in srgb, var(--primary) 16%, var(--border));
+    background:
+      linear-gradient(180deg, rgba(21, 27, 38, 0.96), rgba(12, 17, 26, 0.96));
+    box-shadow: var(--shadow-soft);
   }
 
-  .window-bar {
+  .screenshot-bar {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.55rem 1rem;
-    border-bottom: 1px solid var(--border);
-    background: rgba(255, 255, 255, 0.012);
+    gap: 0.45rem;
+    padding: 0 0.15rem 0.8rem;
   }
 
-  .window-dots { display: flex; gap: 6px; }
-  .window-dots span {
+  .screenshot-bar span {
     width: 10px;
     height: 10px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.07);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--primary) 30%, transparent);
   }
 
-  .window-title {
-    font-size: 0.72rem;
-    color: var(--fg-dim);
-    font-weight: 500;
+  .screenshot-bar span:first-child {
+    background: #ffb4a2;
   }
 
-  .window-body { position: relative; }
-  .window-body::after {
+  .screenshot-bar span:nth-child(2) {
+    background: #89cff0;
+  }
+
+  .screenshot {
+    width: 100%;
+    display: block;
+    border-radius: 16px;
+    border: 1px solid color-mix(in srgb, var(--primary) 12%, var(--border));
+    mask-image: linear-gradient(to bottom, black 86%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, black 86%, transparent 100%);
+  }
+
+  .screenshot-wrap::after {
     content: "";
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 40%;
-    background: linear-gradient(to top, var(--bg), transparent);
+    display: block;
+    width: 100%;
+    height: 120px;
+    margin-top: -1px;
+    opacity: 0.08;
+    transform: scaleY(-1);
+    background: linear-gradient(180deg, rgba(88, 140, 255, 0.18), transparent);
+    mask-image: linear-gradient(to bottom, black 0%, transparent 60%);
+    -webkit-mask-image: linear-gradient(to bottom, black 0%, transparent 60%);
     pointer-events: none;
   }
 
-  .window-img { width: 100%; height: auto; display: block; }
-
-  /* ────────────────────────────────────────────────────── */
-  /*  Features                                             */
-  /* ────────────────────────────────────────────────────── */
-  .features {
-    position: relative;
-    z-index: 1;
-    max-width: 1100px;
-    margin: 5rem auto 0;
-    padding: 0 2rem;
+  .details {
+    width: min(1040px, 100%);
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+    margin: 1.75rem auto 0;
+    padding: 0 0 2rem;
   }
 
-  .features-header {
-    text-align: center;
-    margin-bottom: 2.5rem;
+  .detail-card {
+    padding: 1.25rem;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--card-foreground);
+    box-shadow: var(--shadow-card);
+    backdrop-filter: blur(10px);
   }
 
-  .section-title {
-    font-family: var(--font-brand);
-    font-size: clamp(1.4rem, 2.5vw, 1.85rem);
+  .detail-card h2 {
+    font-size: 1rem;
     font-weight: 600;
     letter-spacing: -0.03em;
     margin-bottom: 0.5rem;
   }
 
-  .section-desc {
+  .detail-card p {
+    color: var(--muted-foreground);
     font-size: 0.95rem;
-    color: var(--fg-muted);
     line-height: 1.6;
   }
 
-  .features-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 1rem;
-  }
-
-  .card {
-    padding: 1.5rem;
-    border-radius: 12px;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    transition: border-color 0.2s, background 0.2s;
-  }
-  .card:hover {
-    border-color: var(--border-hover);
-    background: rgba(255, 255, 255, 0.05);
-  }
-
-  .card-icon {
+  .footer {
     display: flex;
     align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid var(--border);
-    color: var(--fg-muted);
-    margin-bottom: 0.85rem;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1.5rem 2.5rem;
+    font-size: 0.84rem;
+    color: var(--muted-foreground);
   }
 
-  .card h3 {
-    font-size: 0.95rem;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    margin-bottom: 0.4rem;
-  }
-
-  .card p {
-    font-size: 0.87rem;
-    line-height: 1.6;
-    color: var(--fg-muted);
-  }
-
-  /* ────────────────────────────────────────────────────── */
-  /*  Bottom CTA                                           */
-  /* ────────────────────────────────────────────────────── */
-  .bottom-cta {
-    position: relative;
-    z-index: 1;
-    text-align: center;
-    max-width: 540px;
-    margin: 5.5rem auto 0;
-    padding: 0 2rem;
-  }
-
-  .bottom-cta h2 {
-    font-family: var(--font-brand);
-    font-size: clamp(1.3rem, 2.5vw, 1.75rem);
-    font-weight: 600;
-    letter-spacing: -0.03em;
-    margin-bottom: 0.6rem;
-  }
-
-  .bottom-cta p {
-    font-size: 0.95rem;
-    color: var(--fg-muted);
-    margin-bottom: 1.5rem;
-    line-height: 1.6;
-  }
-
-  .bottom-cta-actions {
+  .footer-brand {
     display: flex;
-    justify-content: center;
-    gap: 0.6rem;
+    align-items: center;
+    gap: 0.9rem;
+  }
+
+  .footer-logo {
+    width: 82px;
+    height: auto;
+    opacity: 0.9;
+  }
+
+  .footer-links {
+    display: flex;
+    gap: 1.25rem;
     flex-wrap: wrap;
   }
 
-  /* ────────────────────────────────────────────────────── */
-  /*  Footer                                               */
-  /* ────────────────────────────────────────────────────── */
-  .footer {
-    position: relative;
-    z-index: 1;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    max-width: var(--max-w);
-    margin: 5rem auto 0;
-    padding: 1.5rem 2rem 2.5rem;
-    border-top: 1px solid var(--border);
-  }
-
-  .footer-left {
-    font-size: 0.78rem;
-    color: var(--fg-dim);
-  }
-
-  .footer-links { display: flex; gap: 1.25rem; }
   .footer-links a {
-    font-size: 0.78rem;
-    color: var(--fg-dim);
-    transition: color 0.15s;
+    color: var(--muted-foreground);
+    transition: color 0.2s ease;
   }
-  .footer-links a:hover { color: var(--fg-muted); }
 
-  /* ────────────────────────────────────────────────────── */
-  /*  Responsive                                           */
-  /* ────────────────────────────────────────────────────── */
-  @media (max-width: 960px) {
-    .features-grid {
+  .footer-links a:hover,
+  .footer-links a:focus-visible {
+    color: var(--foreground);
+    outline: none;
+  }
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes screenshot-in {
+    from {
+      opacity: 0;
+      transform: scale(0.985);
+    }
+
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @media (max-width: 900px) {
+    .details {
       grid-template-columns: 1fr;
-      max-width: 480px;
-      margin: 0 auto;
     }
   }
 
-  @media (max-width: 768px) {
-    .hero-content {
-      grid-template-columns: 1fr;
-      text-align: center;
-      padding: 2.5rem 1.5rem 2rem;
-      gap: 2rem;
-    }
-
-    .hero-text {
-      align-items: center;
-      order: 1;
-    }
-
-    .hero-visual {
-      order: 2;
-    }
-
-    .hero-desc { max-width: 100%; }
-
-    .hero-art {
-      width: 70%;
-      max-width: 320px;
-      transform: none;
-    }
-
-    .hero-glow { display: none; }
-    .hero-actions { justify-content: center; }
-    .trust-row { justify-content: center; }
-
-    .nav { padding: 0.75rem 1.25rem; }
-    .nav-end { gap: 0.85rem; }
-    .nav-link { display: none; }
-
-    .showcase, .features { padding: 0 1.25rem; }
-  }
-
-  @media (max-width: 480px) {
-    .hero-title { font-size: 2.75rem; }
-
-    .hero-actions {
+  @media (max-width: 640px) {
+    .nav {
+      padding: 1.25rem 1.25rem 0.75rem;
       flex-direction: column;
-      width: 100%;
+      align-items: flex-start;
     }
 
-    .btn {
+    .nav-links {
       width: 100%;
-      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .main {
+      padding-top: 5vh;
+    }
+
+    .tagline {
+      margin-bottom: 0.9rem;
+    }
+
+    .note-row {
+      gap: 0.6rem;
+    }
+
+    .screenshot-wrap {
+      width: 95vw;
+    }
+
+    .screenshot-shell {
+      border-radius: 20px;
+      padding: 0.75rem 0.75rem 0;
     }
 
     .footer {
+      padding: 1.25rem;
       flex-direction: column;
-      gap: 0.75rem;
-      text-align: center;
+      align-items: flex-start;
+    }
+
+    .footer-brand {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.45rem;
     }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after {
-      transition-duration: 0.01ms !important;
+    html {
+      scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
       animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
     }
   }
 </style>
