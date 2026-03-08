@@ -126,7 +126,16 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build bundled web/server assets
+        if: ${{ matrix.platform != 'win' }}
         run: bun run build --filter=@t3tools/web --filter=t3
+
+      - name: Build bundled web/server assets
+        if: ${{ matrix.platform == 'win' }}
+        shell: pwsh
+        run: |
+          bun run --cwd packages/contracts build
+          bun run --cwd apps/web build
+          bun run --cwd apps/server build
 
       - name: Build desktop artifact
         if: ${{ matrix.platform != 'win' }}
