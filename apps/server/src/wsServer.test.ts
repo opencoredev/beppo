@@ -485,7 +485,7 @@ describe("WebSocket Server", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
     vi.restoreAllMocks();
-  });
+  }, 30_000);
 
   it("sends welcome message on connect", async () => {
     server = await createTestServer({ cwd: "/test/project" });

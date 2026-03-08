@@ -43,6 +43,7 @@ export function resolveHttpOriginFromWsUrl(wsUrl: string): string {
   try {
     return new URL(protocol).origin;
   } catch {
-    return protocol;
+    const queryIndex = protocol.indexOf("?");
+    return queryIndex === -1 ? protocol : protocol.slice(0, queryIndex);
   }
 }

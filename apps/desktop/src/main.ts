@@ -244,11 +244,18 @@ async function waitForHttpUrl(url: string, timeoutMs: number): Promise<void> {
 
   while (Date.now() - startedAt < timeoutMs) {
     try {
-      const response = await fetch(url, { method: "GET" });
-      if (response.ok) {
-        return;
+      const remaining = timeoutMs - (Date.now() - startedAt);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), Math.min(5_000, remaining));
+      try {
+        const response = await fetch(url, { method: "GET", signal: controller.signal });
+        if (response.ok) {
+          return;
+        }
+        lastError = new Error(`HTTP ${response.status}`);
+      } finally {
+        clearTimeout(timer);
       }
-      lastError = new Error(`HTTP ${response.status}`);
     } catch (error) {
       lastError = error;
     }
