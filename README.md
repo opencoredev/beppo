@@ -16,8 +16,9 @@ Beppo is an early-stage interface for running coding agents with a UI that stays
 
 - Very early work in progress
 - Codex is the primary supported provider right now
-- Reliability and performance are prioritized over feature breadth
-- Contributions are not open yet
+- Beppo is an opinionated fork with its own product direction
+- Reliability, performance, and ambitious feature work are all core priorities
+- Contributions are open and encouraged
 
 ## What Is In This Repo
 
@@ -75,9 +76,3 @@ If you just want to use Beppo instead of developing it, install the desktop app 
 - Expect rough edges while the session model and provider orchestration are still evolving
 - Session startup and turn lifecycle are centered around Codex App Server
 - The system is designed to behave predictably during reconnects, restarts, and partial stream failures
-
-## Community
-
-Need support or want to follow development?
-
-[Join the Discord](https://discord.gg/jn4EGJjrvv)
