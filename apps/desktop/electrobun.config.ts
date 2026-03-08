@@ -1,30 +1,41 @@
 import * as OS from "node:os";
 
+import desktopPackageJson from "./package.json" with { type: "json" };
 import type { ElectrobunConfig } from "./src/electrobun-runtime";
 
 const isWslBuild =
   Boolean(process.env.WSL_DISTRO_NAME) ||
   OS.release().toLowerCase().includes("microsoft");
+const isDevWatch = process.argv.includes("dev") && process.argv.includes("--watch");
+const APP_BUNDLE_IDENTIFIER = "com.t3tools.beppo";
+const APP_URL_SCHEME = "beppo";
+const DEFAULT_UPDATE_BASE_URL = "https://github.com/opencoredev/beppo/releases/latest/download";
+const appVersion = process.env.T3CODE_DESKTOP_VERSION?.trim() || desktopPackageJson.version;
+const releaseBaseUrl =
+  process.env.T3CODE_DESKTOP_UPDATE_BASE_URL?.trim() || DEFAULT_UPDATE_BASE_URL;
 
 const config = {
   app: {
     name: "Beppo",
-    identifier: "com.t3tools.t3code",
-    version: "0.0.2",
+    identifier: APP_BUNDLE_IDENTIFIER,
+    version: appVersion,
     description: "Beppo desktop app",
-    urlSchemes: ["t3"],
+    urlSchemes: [APP_URL_SCHEME],
   },
   build: {
     buildFolder: "build",
     artifactFolder: "artifacts",
     targets: process.env.ELECTROBUN_TARGETS ?? "current",
     bun: {
-      entrypoint: "src/main.ts",
-      sourcemap: "linked",
+      entrypoint: "src/bun/index.ts",
     },
     copy: {
       "preload.js": "preload.js",
-      "../server/dist": "apps/server/dist",
+      ...(!isDevWatch
+        ? {
+            "../server/dist": "apps/server/dist",
+          }
+        : {}),
     },
     mac: {
       defaultRenderer: "native",
@@ -52,13 +63,12 @@ const config = {
         : {}),
     },
   },
-  ...(process.env.T3CODE_DESKTOP_UPDATE_BASE_URL
-    ? {
-        release: {
-          baseUrl: process.env.T3CODE_DESKTOP_UPDATE_BASE_URL,
-        },
-      }
-    : {}),
+  release: {
+    baseUrl: releaseBaseUrl,
+  },
+  scripts: {
+    postBuild: "scripts/post-build-icons.ts",
+  },
   runtime: {
     exitOnLastWindowClosed: true,
   },

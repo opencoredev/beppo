@@ -12,8 +12,10 @@ import {
   resolveModelSlug,
   resolveModelSlugForProvider,
 } from "@t3tools/shared/model";
+import { APP_STORAGE_PREFIX, LEGACY_APP_STORAGE_PREFIX } from "@t3tools/shared/branding";
 import { create } from "zustand";
 import { type ChatMessage, type Project, type Thread } from "./types";
+import { getDesktopWsUrl, resolveHttpOriginFromWsUrl } from "./desktopRuntime";
 
 // ── State ────────────────────────────────────────────────────────────
 
@@ -23,12 +25,12 @@ export interface AppState {
   threadsHydrated: boolean;
 }
 
-const PERSISTED_STATE_KEY = "t3code:renderer-state:v8";
+const PERSISTED_STATE_KEY = `${APP_STORAGE_PREFIX}:renderer-state:v8`;
 const LEGACY_PERSISTED_STATE_KEYS = [
-  "t3code:renderer-state:v6",
-  "t3code:renderer-state:v5",
-  "t3code:renderer-state:v4",
-  "t3code:renderer-state:v3",
+  `${LEGACY_APP_STORAGE_PREFIX}:renderer-state:v6`,
+  `${LEGACY_APP_STORAGE_PREFIX}:renderer-state:v5`,
+  `${LEGACY_APP_STORAGE_PREFIX}:renderer-state:v4`,
+  `${LEGACY_APP_STORAGE_PREFIX}:renderer-state:v3`,
   "codething:renderer-state:v4",
   "codething:renderer-state:v3",
   "codething:renderer-state:v2",
@@ -167,23 +169,13 @@ function inferProviderForThreadModel(input: {
 
 function resolveWsHttpOrigin(): string {
   if (typeof window === "undefined") return "";
-  const bridgeWsUrl = window.desktopBridge?.getWsUrl?.();
   const envWsUrl = import.meta.env.VITE_WS_URL as string | undefined;
   const wsCandidate =
-    typeof bridgeWsUrl === "string" && bridgeWsUrl.length > 0
-      ? bridgeWsUrl
-      : typeof envWsUrl === "string" && envWsUrl.length > 0
-        ? envWsUrl
-        : null;
+    getDesktopWsUrl() ??
+    (typeof envWsUrl === "string" && envWsUrl.length > 0 ? envWsUrl : null);
   if (!wsCandidate) return window.location.origin;
-  try {
-    const wsUrl = new URL(wsCandidate);
-    const protocol =
-      wsUrl.protocol === "wss:" ? "https:" : wsUrl.protocol === "ws:" ? "http:" : wsUrl.protocol;
-    return `${protocol}//${wsUrl.host}`;
-  } catch {
-    return window.location.origin;
-  }
+
+  return resolveHttpOriginFromWsUrl(wsCandidate);
 }
 
 function toAttachmentPreviewUrl(rawUrl: string): string {

@@ -166,7 +166,7 @@ interface StagePackageJson {
   readonly name: string;
   readonly version: string;
   readonly buildVersion: string;
-  readonly t3codeCommitHash: string;
+  readonly beppoCommitHash: string;
   readonly private: true;
   readonly description: string;
   readonly author: string;
@@ -447,9 +447,9 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   signed: boolean,
 ) {
   const buildConfig: Record<string, unknown> = {
-    appId: "com.t3tools.t3code",
+    appId: "com.t3tools.beppo",
     productName,
-    artifactName: "T3-Code-${version}-${arch}.${ext}",
+    artifactName: "Beppo-${version}-${arch}.${ext}",
     directories: {
       buildResources: "apps/desktop/resources",
     },
@@ -614,7 +614,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     name: "beppo-desktop",
     version: appVersion,
     buildVersion: appVersion,
-    t3codeCommitHash: commitHash,
+    beppoCommitHash: commitHash,
     private: true,
     description: "Beppo desktop build",
     author: "Beppo",

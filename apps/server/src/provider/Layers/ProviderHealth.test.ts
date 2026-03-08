@@ -94,7 +94,7 @@ it.effect("returns unavailable when codex is below the minimum supported version
     assert.strictEqual(status.authStatus, "unknown");
     assert.strictEqual(
       status.message,
-      "Codex CLI v0.36.0 is too old for T3 Code. Upgrade to v0.37.0 or newer and restart T3 Code.",
+      "Codex CLI v0.36.0 is too old for Beppo. Upgrade to v0.37.0 or newer and restart Beppo.",
     );
   }).pipe(
     Effect.provide(

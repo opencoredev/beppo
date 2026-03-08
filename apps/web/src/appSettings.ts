@@ -1,9 +1,10 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { Option, Schema } from "effect";
 import { type ProviderKind, type ProviderServiceTier } from "@t3tools/contracts";
+import { APP_STORAGE_PREFIX } from "@t3tools/shared/branding";
 import { getDefaultModel, getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
 
-const APP_SETTINGS_STORAGE_KEY = "t3code:app-settings:v1";
+const APP_SETTINGS_STORAGE_KEY = `${APP_STORAGE_PREFIX}:app-settings:v1`;
 const MAX_CUSTOM_MODEL_COUNT = 32;
 export const MAX_CUSTOM_MODEL_LENGTH = 256;
 export const APP_SERVICE_TIER_OPTIONS = [

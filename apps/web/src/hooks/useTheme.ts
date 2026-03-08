@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { APP_STORAGE_PREFIX } from "@t3tools/shared/branding";
 
 type Theme = "light" | "dark" | "system";
 type ThemeSnapshot = {
@@ -6,7 +7,7 @@ type ThemeSnapshot = {
   systemDark: boolean;
 };
 
-const STORAGE_KEY = "t3code:theme";
+const STORAGE_KEY = `${APP_STORAGE_PREFIX}:theme`;
 const MEDIA_QUERY = "(prefers-color-scheme: dark)";
 
 let listeners: Array<() => void> = [];

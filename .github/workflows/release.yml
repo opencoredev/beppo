@@ -88,23 +88,23 @@ jobs:
           - label: macOS arm64
             runner: macos-14
             platform: mac
-            target: dmg
             arch: arm64
+            electrobun_target: macos-arm64
           - label: macOS x64
             runner: macos-15-intel
             platform: mac
-            target: dmg
             arch: x64
+            electrobun_target: macos-x64
           - label: Linux x64
             runner: ubuntu-24.04
             platform: linux
-            target: AppImage
             arch: x64
+            electrobun_target: linux-x64
           - label: Windows x64
             runner: windows-2022
             platform: win
-            target: nsis
             arch: x64
+            electrobun_target: win-x64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -125,6 +125,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Build bundled web/server assets
+        run: bun run build --filter=@t3tools/web --filter=t3
+
       - name: Build desktop artifact
         shell: bash
         env:
@@ -140,15 +143,10 @@ jobs:
           AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
           AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
           AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
+          ELECTROBUN_TARGETS: ${{ matrix.electrobun_target }}
+          T3CODE_DESKTOP_VERSION: ${{ needs.preflight.outputs.version }}
+          T3CODE_DESKTOP_UPDATE_BASE_URL: https://github.com/opencoredev/beppo/releases/latest/download
         run: |
-          args=(
-            --platform "${{ matrix.platform }}"
-            --target "${{ matrix.target }}"
-            --arch "${{ matrix.arch }}"
-            --build-version "${{ needs.preflight.outputs.version }}"
-            --verbose
-          )
-
           has_all() {
             for value in "$@"; do
               if [[ -z "$value" ]]; then
@@ -186,7 +184,7 @@ jobs:
             echo "Signing disabled for ${{ matrix.platform }}."
           fi
 
-          bun run dist:desktop:artifact -- "${args[@]}"
+          bun run dist:desktop:artifact
 
       - name: Collect release assets
         shell: bash
@@ -195,23 +193,11 @@ jobs:
           mkdir -p release-publish
 
           shopt -s nullglob
-          for pattern in \
-            "release/*.dmg" \
-            "release/*.zip" \
-            "release/*.AppImage" \
-            "release/*.exe" \
-            "release/*.blockmap" \
-            "release/latest*.yml"; do
-            for file in $pattern; do
+          for file in apps/desktop/artifacts/*; do
+            if [[ -f "$file" ]]; then
               cp "$file" release-publish/
-            done
-          done
-
-          if [[ "${{ matrix.platform }}" == "mac" && "${{ matrix.arch }}" != "arm64" ]]; then
-            if [[ -f release-publish/latest-mac.yml ]]; then
-              mv release-publish/latest-mac.yml "release-publish/latest-mac-${{ matrix.arch }}.yml"
             fi
-          fi
+          done
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -280,12 +266,7 @@ jobs:
           prerelease: ${{ needs.preflight.outputs.is_prerelease }}
           make_latest: ${{ needs.preflight.outputs.make_latest }}
           files: |
-            release-assets/*.dmg
-            release-assets/*.zip
-            release-assets/*.AppImage
-            release-assets/*.exe
-            release-assets/*.blockmap
-            release-assets/latest*.yml
+            release-assets/*
           fail_on_unmatched_files: true
 
   finalize:

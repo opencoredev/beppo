@@ -8,6 +8,7 @@ import {
   type ProviderInteractionMode,
   type RuntimeMode,
 } from "@t3tools/contracts";
+import { APP_STORAGE_PREFIX } from "@t3tools/shared/branding";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import {
   DEFAULT_INTERACTION_MODE,
@@ -17,7 +18,7 @@ import {
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-export const COMPOSER_DRAFT_STORAGE_KEY = "t3code:composer-drafts:v1";
+export const COMPOSER_DRAFT_STORAGE_KEY = `${APP_STORAGE_PREFIX}:composer-drafts:v1`;
 export type DraftThreadEnvMode = "local" | "worktree";
 
 export interface PersistedComposerImageAttachment {

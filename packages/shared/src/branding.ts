@@ -1,0 +1,9 @@
+export const APP_NAME = "Beppo";
+export const APP_HIDDEN_DIR = ".beppo";
+export const APP_STORAGE_PREFIX = "beppo";
+export const LEGACY_APP_STORAGE_PREFIX = "t3code";
+export const WORKTREE_BRANCH_PREFIX = "beppo";
+export const APP_BUNDLE_IDENTIFIER = "com.t3tools.beppo";
+export const APP_URL_SCHEME = "beppo";
+export const DESKTOP_WS_URL_SEARCH_PARAM = "beppoDesktopWsUrl";
+export const LEGACY_DESKTOP_WS_URL_SEARCH_PARAM = "t3DesktopWsUrl";

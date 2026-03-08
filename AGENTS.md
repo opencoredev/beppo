@@ -51,3 +51,15 @@ Docs:
 - Codex-Monitor (Tauri, feature-complete, strong reference implementation): https://github.com/Dimillian/CodexMonitor
 
 Use these as implementation references when designing protocol handling, UX flows, and operational safeguards.
+
+## Release Workflow
+
+- Beppo releases are intentionally grouped. Do not assume every merge to `main` should ship a release.
+- Merging a PR into `main` does not create a release by itself. The release workflow runs only when a version tag like `v0.0.5` is pushed, or when `release.yml` is triggered manually.
+- Preferred release flow:
+  1. Merge the PRs you want into `main`.
+  2. When ready to ship, run `bun run release:tag -- 0.0.5` from a clean local `main` branch.
+  3. That command creates a local annotated tag after `git pull --rebase origin main`.
+  4. Push the tag with `git push origin v0.0.5` when you are ready to publish.
+- `bun run release:tag -- 0.0.5 --push` is allowed when you explicitly want the helper to push the tag immediately.
+- Release tags must use the `vX.Y.Z` format because `.github/workflows/release.yml` listens for `v*.*.*`.

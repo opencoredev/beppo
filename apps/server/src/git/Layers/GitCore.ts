@@ -1,4 +1,5 @@
 import { Cache, Data, Duration, Effect, Exit, FileSystem, Layer, Path } from "effect";
+import { APP_HIDDEN_DIR } from "@t3tools/shared/branding";
 
 import { GitCommandError } from "../Errors.ts";
 import { GitService } from "../Services/GitService.ts";
@@ -1019,7 +1020,7 @@ const makeGitCore = Effect.gen(function* () {
       const repoName = path.basename(input.cwd);
       const homeDir = process.env.HOME ?? process.env.USERPROFILE ?? "/tmp";
       const worktreePath =
-        input.path ?? path.join(homeDir, ".t3", "worktrees", repoName, sanitizedBranch);
+        input.path ?? path.join(homeDir, APP_HIDDEN_DIR, "worktrees", repoName, sanitizedBranch);
 
       yield* executeGit(
         "GitCore.createWorktree",

@@ -7,7 +7,6 @@
       "outputs": ["build/**", "artifacts/**"],
     },
     "dev": {
-      "dependsOn": ["t3#build"],
       "persistent": true,
     },
     "start": {

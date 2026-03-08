@@ -46,7 +46,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
   });
 
   describe("createDevRunnerEnv", () => {
-    it.effect("defaults state dir to ~/.t3/dev when not provided", () =>
+    it.effect("defaults state dir to ~/.beppo/dev when not provided", () =>
       Effect.gen(function* () {
         const [env, defaultStateDir] = yield* Effect.all([
           createDevRunnerEnv({
