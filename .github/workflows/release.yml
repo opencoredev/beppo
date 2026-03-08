@@ -256,6 +256,7 @@ jobs:
   publish_cli:
     name: Publish CLI to npm
     needs: [preflight, build]
+    continue-on-error: true
     runs-on: ubuntu-24.04
     env:
       NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -277,7 +278,7 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Skip npm publish when token is unavailable
         if: ${{ !env.NODE_AUTH_TOKEN }}
@@ -293,7 +294,7 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    needs: [preflight, build, publish_cli]
+    needs: [preflight, build]
     runs-on: ubuntu-24.04
     steps:
       - name: Download all desktop artifacts
