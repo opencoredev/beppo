@@ -16,9 +16,11 @@ import {
   type ChatImageAttachment,
 } from "./types";
 import { create } from "zustand";
-import { createJSONStorage, persist } from "zustand/middleware";
+import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
+import { LEGACY_APP_STORAGE_PREFIX } from "@t3tools/shared/branding";
 
 export const COMPOSER_DRAFT_STORAGE_KEY = `${APP_STORAGE_PREFIX}:composer-drafts:v1`;
+const LEGACY_COMPOSER_DRAFT_STORAGE_KEY = `${LEGACY_APP_STORAGE_PREFIX}:composer-drafts:v1`;
 export type DraftThreadEnvMode = "local" | "worktree";
 
 export interface PersistedComposerImageAttachment {
@@ -440,7 +442,9 @@ function readPersistedAttachmentIdsFromStorage(threadId: ThreadId): string[] {
     return [];
   }
   try {
-    const raw = localStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY);
+    const raw =
+      localStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY) ??
+      localStorage.getItem(LEGACY_COMPOSER_DRAFT_STORAGE_KEY);
     const persisted = parsePersistedDraftStateRaw(raw);
     return (persisted.draftsByThreadId[threadId]?.attachments ?? []).map(
       (attachment) => attachment.id,
@@ -520,6 +524,20 @@ function toHydratedThreadDraft(
     codexFastMode: persistedDraft.codexFastMode === true,
   };
 }
+
+const composerDraftStateStorage: StateStorage = {
+  getItem(name) {
+    return localStorage.getItem(name) ?? localStorage.getItem(LEGACY_COMPOSER_DRAFT_STORAGE_KEY);
+  },
+  setItem(name, value) {
+    localStorage.setItem(name, value);
+    localStorage.removeItem(LEGACY_COMPOSER_DRAFT_STORAGE_KEY);
+  },
+  removeItem(name) {
+    localStorage.removeItem(name);
+    localStorage.removeItem(LEGACY_COMPOSER_DRAFT_STORAGE_KEY);
+  },
+};
 
 export const useComposerDraftStore = create<ComposerDraftStoreState>()(
   persist(
@@ -1170,7 +1188,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
     {
       name: COMPOSER_DRAFT_STORAGE_KEY,
       version: 1,
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => composerDraftStateStorage),
       partialize: (state) => {
         const persistedDraftsByThreadId: PersistedComposerDraftStoreState["draftsByThreadId"] = {};
         for (const [threadId, draft] of Object.entries(state.draftsByThreadId)) {

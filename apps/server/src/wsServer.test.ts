@@ -691,7 +691,7 @@ describe("WebSocket Server", () => {
     expect(firstBootstrapProjectId).toBeDefined();
     expect(firstBootstrapThreadId).toBeDefined();
 
-    firstWs.close();
+    await closeClientSocket(firstWs);
     await closeTestServer();
     server = null;
 

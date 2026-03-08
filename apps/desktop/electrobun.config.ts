@@ -11,8 +11,10 @@ const APP_BUNDLE_IDENTIFIER = "com.t3tools.beppo";
 const APP_URL_SCHEME = "beppo";
 const DEFAULT_UPDATE_BASE_URL = "https://github.com/opencoredev/beppo/releases/latest/download";
 const appVersion = process.env.T3CODE_DESKTOP_VERSION?.trim() || desktopPackageJson.version;
-const releaseBaseUrl =
-  process.env.T3CODE_DESKTOP_UPDATE_BASE_URL?.trim() || DEFAULT_UPDATE_BASE_URL;
+const configuredReleaseBaseUrl = process.env.T3CODE_DESKTOP_UPDATE_BASE_URL?.trim();
+const shouldConfigureRelease =
+  typeof configuredReleaseBaseUrl === "string" && configuredReleaseBaseUrl.length > 0;
+const releaseBaseUrl = configuredReleaseBaseUrl || DEFAULT_UPDATE_BASE_URL;
 
 const config = {
   app: {
@@ -64,9 +66,13 @@ const config = {
         : {}),
     },
   },
-  release: {
-    baseUrl: releaseBaseUrl,
-  },
+  ...(shouldConfigureRelease
+    ? {
+        release: {
+          baseUrl: releaseBaseUrl,
+        },
+      }
+    : {}),
   scripts: {
     postBuild: "scripts/post-build-icons.ts",
   },

@@ -21,6 +21,24 @@ function runGit(args: string[], options?: { allowFailure?: boolean }): string {
   return result.stdout.trim();
 }
 
+function pullMainWithAbortOnFailure(): void {
+  const result = spawnSync("git", ["pull", "--rebase", "origin", "main"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  if (result.status === 0) {
+    return;
+  }
+
+  spawnSync("git", ["rebase", "--abort"], {
+    encoding: "utf8",
+    stdio: ["ignore", "ignore", "ignore"],
+  });
+  const stderr = result.stderr.trim();
+  fail(`git pull --rebase origin main failed${stderr ? `: ${stderr}` : "."}`);
+}
+
 function normalizeVersion(rawVersion: string | undefined): string {
   if (!rawVersion) {
     fail("Missing version. Usage: bun run release:tag -- 0.0.5 [--push]");
@@ -50,11 +68,18 @@ if (workingTree.length > 0) {
 }
 
 console.log(`[release-tag] Updating local main with 'git pull --rebase origin main'...`);
-runGit(["pull", "--rebase", "origin", "main"]);
+pullMainWithAbortOnFailure();
 
 const existingTag = runGit(["tag", "--list", tag]);
 if (existingTag === tag) {
   fail(`Tag '${tag}' already exists locally.`);
+}
+
+const remoteTag = runGit(["ls-remote", "--tags", "origin", `refs/tags/${tag}`], {
+  allowFailure: true,
+});
+if (remoteTag.length > 0) {
+  fail(`Tag '${tag}' already exists on origin. Pull the tag locally or choose a different version.`);
 }
 
 console.log(`[release-tag] Creating annotated tag ${tag}...`);

@@ -110,6 +110,32 @@ const isServerNotRunningError = (error: unknown): boolean => {
   );
 };
 
+function closeWebSocketClient(client: WebSocket): Effect.Effect<void> {
+  if (client.readyState === client.CLOSED) {
+    return Effect.void;
+  }
+
+  return Effect.callback<void>((resume) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      resume(Effect.void);
+    }, 1_000);
+
+    const handleClose = () => {
+      cleanup();
+      resume(Effect.void);
+    };
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      client.off("close", handleClose);
+    };
+
+    client.once("close", handleClose);
+    client.close();
+  });
+}
+
 function rejectUpgrade(socket: Duplex, statusCode: number, message: string): void {
   socket.end(
     `HTTP/1.1 ${statusCode} ${statusCode === 401 ? "Unauthorized" : "Bad Request"}\r\n` +
@@ -606,7 +632,9 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   });
 
   const closeAllClients = Ref.get(clients).pipe(
-    Effect.flatMap(Effect.forEach((client) => Effect.sync(() => client.close()))),
+    Effect.flatMap((connectedClients) =>
+      Effect.forEach(connectedClients, closeWebSocketClient, { concurrency: "unbounded" }),
+    ),
     Effect.flatMap(() => Ref.set(clients, new Set())),
   );
 

@@ -27,6 +27,7 @@ export interface AppState {
 
 const PERSISTED_STATE_KEY = `${APP_STORAGE_PREFIX}:renderer-state:v8`;
 const LEGACY_PERSISTED_STATE_KEYS = [
+  `${LEGACY_APP_STORAGE_PREFIX}:renderer-state:v8`,
   `${LEGACY_APP_STORAGE_PREFIX}:renderer-state:v6`,
   `${LEGACY_APP_STORAGE_PREFIX}:renderer-state:v5`,
   `${LEGACY_APP_STORAGE_PREFIX}:renderer-state:v4`,
