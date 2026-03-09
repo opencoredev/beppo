@@ -51,6 +51,7 @@ const config = {
     },
     mac: {
       codesign: hasMacCodesignIdentity,
+      icons: "resources/icon.iconset",
       notarize: hasMacCodesignIdentity && hasMacNotarizationCredentials,
       defaultRenderer: "native",
     },
