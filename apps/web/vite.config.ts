@@ -8,6 +8,7 @@ const port = Number(process.env.PORT ?? 5733);
 const srcPath = fileURLToPath(new URL("./src", import.meta.url));
 
 export default defineConfig({
+  base: "./",
   plugins: [
     tanstackRouter(),
     react({
@@ -47,5 +48,6 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    target: "es2020",
   },
 });

@@ -65,6 +65,70 @@ jobs:
         with:
           node-version-file: package.json
 
+      - name: Import Apple code-signing certificate
+        if: ${{ matrix.platform == 'mac' }}
+        shell: bash
+        env:
+          MAC_CERTIFICATE_BASE64: ${{ secrets.CSC_LINK }}
+          MAC_CERTIFICATE_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${MAC_CERTIFICATE_BASE64:-}" || -z "${MAC_CERTIFICATE_PASSWORD:-}" ]]; then
+            echo "Apple signing certificate unavailable; skipping certificate import."
+            exit 0
+          fi
+
+          keychain_path="$RUNNER_TEMP/beppo-signing.keychain-db"
+          keychain_password="$(uuidgen)"
+          certificate_path="$RUNNER_TEMP/beppo-signing-cert.p12"
+
+          printf '%s' "$MAC_CERTIFICATE_BASE64" | base64 --decode > "$certificate_path"
+
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" -k "$keychain_path" -P "$MAC_CERTIFICATE_PASSWORD" -A -f pkcs12
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain_path"
+
+          existing_keychains="$(security list-keychains -d user | tr -d '\"')"
+          security list-keychains -d user -s "$keychain_path" $existing_keychains
+
+      - name: Resolve Apple signing environment
+        if: ${{ matrix.platform == 'mac' }}
+        id: mac_signing
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ELECTROBUN_APPLEID_SECRET: ${{ secrets.ELECTROBUN_APPLEID }}
+          ELECTROBUN_APPLEIDPASS_SECRET: ${{ secrets.ELECTROBUN_APPLEIDPASS }}
+          ELECTROBUN_TEAMID_SECRET: ${{ secrets.ELECTROBUN_TEAMID }}
+        run: |
+          set -euo pipefail
+
+          developer_id="$(security find-identity -v -p codesigning | sed -n 's/.*"\\(Developer ID Application[^"]*\\)".*/\\1/p' | head -n 1)"
+          if [[ -n "$developer_id" ]]; then
+            echo "developer_id=$developer_id" >> "$GITHUB_OUTPUT"
+            echo "codesign_enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "codesign_enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          apple_id="${ELECTROBUN_APPLEID_SECRET:-${APPLE_ID:-}}"
+          apple_id_pass="${ELECTROBUN_APPLEIDPASS_SECRET:-${APPLE_APP_SPECIFIC_PASSWORD:-}}"
+          team_id="${ELECTROBUN_TEAMID_SECRET:-${APPLE_TEAM_ID:-}}"
+
+          if [[ -n "$apple_id" && -n "$apple_id_pass" && -n "$team_id" ]]; then
+            echo "apple_id=$apple_id" >> "$GITHUB_OUTPUT"
+            echo "apple_id_pass=$apple_id_pass" >> "$GITHUB_OUTPUT"
+            echo "team_id=$team_id" >> "$GITHUB_OUTPUT"
+            echo "notarize_enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "notarize_enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
@@ -141,11 +205,10 @@ jobs:
         if: ${{ matrix.platform != 'win' }}
         shell: bash
         env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          ELECTROBUN_DEVELOPER_ID: ${{ steps.mac_signing.outputs.developer_id }}
+          ELECTROBUN_APPLEID: ${{ steps.mac_signing.outputs.apple_id }}
+          ELECTROBUN_APPLEIDPASS: ${{ steps.mac_signing.outputs.apple_id_pass }}
+          ELECTROBUN_TEAMID: ${{ steps.mac_signing.outputs.team_id }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
@@ -167,14 +230,16 @@ jobs:
           }
 
           if [[ "${{ matrix.platform }}" == "mac" ]]; then
-            if has_all "$CSC_LINK" "$CSC_KEY_PASSWORD" "$APPLE_API_KEY" "$APPLE_API_KEY_ID" "$APPLE_API_ISSUER"; then
-              key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
-              printf '%s' "$APPLE_API_KEY" > "$key_path"
-              export APPLE_API_KEY="$key_path"
-              echo "macOS signing enabled."
-              args+=(--signed)
+            if [[ "${{ steps.mac_signing.outputs.codesign_enabled }}" == "true" ]]; then
+              echo "macOS codesigning enabled."
             else
-              echo "macOS signing disabled (missing one or more Apple signing secrets)."
+              echo "macOS codesigning disabled (certificate or identity unavailable)."
+            fi
+
+            if [[ "${{ steps.mac_signing.outputs.notarize_enabled }}" == "true" ]]; then
+              echo "macOS notarization enabled."
+            else
+              echo "macOS notarization disabled (Apple ID credentials unavailable)."
             fi
           elif [[ "${{ matrix.platform }}" == "win" ]]; then
             if has_all \
@@ -185,10 +250,9 @@ jobs:
               "$AZURE_TRUSTED_SIGNING_ACCOUNT_NAME" \
               "$AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME" \
               "$AZURE_TRUSTED_SIGNING_PUBLISHER_NAME"; then
-              echo "Windows signing enabled (Azure Trusted Signing)."
-              args+=(--signed)
+              echo "Windows signing configuration detected."
             else
-              echo "Windows signing disabled (missing one or more Azure Trusted Signing secrets)."
+              echo "Windows signing unavailable for this Electrobun release path."
             fi
           else
             echo "Signing disabled for ${{ matrix.platform }}."

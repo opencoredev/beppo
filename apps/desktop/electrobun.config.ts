@@ -15,6 +15,15 @@ const configuredReleaseBaseUrl = process.env.T3CODE_DESKTOP_UPDATE_BASE_URL?.tri
 const shouldConfigureRelease =
   typeof configuredReleaseBaseUrl === "string" && configuredReleaseBaseUrl.length > 0;
 const releaseBaseUrl = configuredReleaseBaseUrl || DEFAULT_UPDATE_BASE_URL;
+const hasMacCodesignIdentity = typeof process.env.ELECTROBUN_DEVELOPER_ID === "string"
+  && process.env.ELECTROBUN_DEVELOPER_ID.trim().length > 0;
+const hasMacNotarizationCredentials =
+  typeof process.env.ELECTROBUN_APPLEID === "string"
+    && process.env.ELECTROBUN_APPLEID.trim().length > 0
+    && typeof process.env.ELECTROBUN_APPLEIDPASS === "string"
+    && process.env.ELECTROBUN_APPLEIDPASS.trim().length > 0
+    && typeof process.env.ELECTROBUN_TEAMID === "string"
+    && process.env.ELECTROBUN_TEAMID.trim().length > 0;
 
 const config = {
   app: {
@@ -41,10 +50,12 @@ const config = {
         : {}),
     },
     mac: {
+      codesign: hasMacCodesignIdentity,
+      notarize: hasMacCodesignIdentity && hasMacNotarizationCredentials,
       defaultRenderer: "native",
     },
     win: {
-      icon: "resources/icon.ico",
+      icon: "resources/icon.png",
       defaultRenderer: "native",
     },
     linux: {
