@@ -63,3 +63,7 @@ Use these as implementation references when designing protocol handling, UX flow
   4. Push the tag with `git push origin v0.0.5` when you are ready to publish.
 - `bun run release:tag -- 0.0.5 --push` is allowed when you explicitly want the helper to push the tag immediately.
 - Release tags must use the `vX.Y.Z` format because `.github/workflows/release.yml` listens for `v*.*.*`.
+- Successful tagged releases publish a real GitHub Release page with downloadable desktop assets for macOS, Linux, and Windows. Do not describe a release as complete if only the tag exists.
+- Expected tagged release runtime is roughly 6 to 8 minutes end-to-end: about 2 to 3 minutes for preflight, about 3 to 4 minutes for desktop builds, then the release publish step.
+- When asked to "ship", "cut a release", or "deploy" Beppo, the default action is: update `main`, create or push the next `vX.Y.Z` tag, and monitor the `Release Beppo` workflow until the GitHub Release page exists and assets are attached.
+- The `Publish CLI to npm` job is non-blocking for desktop releases. A release is still valid if the GitHub Release page and desktop assets publish successfully even when npm publish fails.
