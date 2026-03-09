@@ -65,6 +65,63 @@ jobs:
         with:
           node-version-file: package.json
 
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun run test
+
+  build:
+    name: Build ${{ matrix.label }}
+    needs: preflight
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS arm64
+            runner: macos-14
+            platform: mac
+            arch: arm64
+            electrobun_target: macos-arm64
+          - label: macOS x64
+            runner: macos-15-intel
+            platform: mac
+            arch: x64
+            electrobun_target: macos-x64
+          - label: Linux x64
+            runner: ubuntu-24.04
+            platform: linux
+            arch: x64
+            electrobun_target: linux-x64
+          - label: Windows x64
+            runner: windows-2022
+            platform: win
+            arch: x64
+            electrobun_target: win-x64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: package.json
+
       - name: Import Apple code-signing certificate
         if: ${{ matrix.platform == 'mac' }}
         shell: bash
@@ -128,63 +185,6 @@ jobs:
           else
             echo "notarize_enabled=false" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Lint
-        run: bun run lint
-
-      - name: Typecheck
-        run: bun run typecheck
-
-      - name: Test
-        run: bun run test
-
-  build:
-    name: Build ${{ matrix.label }}
-    needs: preflight
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - label: macOS arm64
-            runner: macos-14
-            platform: mac
-            arch: arm64
-            electrobun_target: macos-arm64
-          - label: macOS x64
-            runner: macos-15-intel
-            platform: mac
-            arch: x64
-            electrobun_target: macos-x64
-          - label: Linux x64
-            runner: ubuntu-24.04
-            platform: linux
-            arch: x64
-            electrobun_target: linux-x64
-          - label: Windows x64
-            runner: windows-2022
-            platform: win
-            arch: x64
-            electrobun_target: win-x64
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.preflight.outputs.ref }}
-          fetch-depth: 0
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
