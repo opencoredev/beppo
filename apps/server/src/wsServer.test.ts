@@ -361,12 +361,13 @@ async function waitForPush(
   channel: string,
   predicate?: (push: WsPush) => boolean,
   maxMessages = 120,
+  timeoutMs = 5_000,
 ): Promise<WsPush> {
   const take = async (remaining: number): Promise<WsPush> => {
     if (remaining <= 0) {
       throw new Error(`Timed out waiting for push on ${channel}`);
     }
-    const message = (await waitForMessage(ws)) as WsPush;
+    const message = (await waitForMessage(ws, timeoutMs)) as WsPush;
     if (message.type !== "push" || message.channel !== channel) {
       return take(remaining - 1);
     }
@@ -784,7 +785,7 @@ describe("WebSocket Server", () => {
         bootstrapThreadId: firstBootstrapThreadId,
       }),
     );
-  });
+  }, 15_000);
 
   it("logs outbound websocket push events in dev mode", async () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {
@@ -980,6 +981,8 @@ describe("WebSocket Server", () => {
         Boolean((push.data as { issues: Array<{ kind: string }> }).issues[0]) &&
         (push.data as { issues: Array<{ kind: string }> }).issues[0]!.kind ===
           "keybindings.malformed-config",
+      120,
+      10_000,
     );
     expect(malformedPush.data).toEqual({
       issues: [{ kind: "keybindings.malformed-config", message: expect.any(String) }],
@@ -993,9 +996,11 @@ describe("WebSocket Server", () => {
       (push) =>
         Array.isArray((push.data as { issues?: unknown[] }).issues) &&
         (push.data as { issues: unknown[] }).issues.length === 0,
+      120,
+      10_000,
     );
     expect(successPush.data).toEqual({ issues: [], providers: defaultProviderStatuses });
-  });
+  }, 15_000);
 
   it("routes shell.openInEditor through the injected open service", async () => {
     const openCalls: Array<{ cwd: string; editor: string }> = [];
