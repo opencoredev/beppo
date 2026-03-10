@@ -71,6 +71,44 @@ If you just want to use Beppo instead of developing it, install the desktop app 
 
 [Download Beppo Desktop](https://github.com/opencoredev/beppo/releases)
 
+### macOS release note
+
+The latest desktop release is live, but macOS builds are currently shipped without Apple signing/notarization. That means some Mac users will see Apple's "could not verify" warning when opening Beppo for the first time.
+
+This does not mean the app is known-malicious. It means the current release pipeline does not yet have the Apple Developer signing credentials needed for the normal Gatekeeper approval path.
+
+Current state:
+
+- Linux and desktop asset-path packaging issues have been fixed in the latest release
+- The latest public desktop release is `v0.0.13`
+- macOS still requires a manual first-run workaround until Apple signing and notarization are configured
+
+macOS workaround:
+
+1. Drag `Beppo.app` into `Applications`
+2. In Finder, `Control-click` `Beppo.app`
+3. Choose `Open`
+4. In the warning dialog, click `Open`
+
+If macOS still blocks it:
+
+1. Open `System Settings`
+2. Go to `Privacy & Security`
+3. Find the Beppo security warning near the bottom
+4. Click `Open Anyway`
+
+Terminal fallback:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Beppo.app
+open /Applications/Beppo.app
+```
+
+Long term fix:
+
+- Proper Mac distribution requires Apple code signing and notarization
+- Until those credentials are configured in GitHub Actions, macOS releases will continue to need the manual first-run workaround
+
 ## Notes
 
 - Expect rough edges while the session model and provider orchestration are still evolving
