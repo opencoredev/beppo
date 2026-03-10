@@ -4,7 +4,6 @@ import * as FS from "node:fs";
 import * as Net from "node:net";
 import * as OS from "node:os";
 import * as Path from "node:path";
-import { pathToFileURL } from "node:url";
 
 import desktopPackageJson from "../package.json" with { type: "json" };
 
@@ -194,30 +193,14 @@ function resolveBackendEntry(): string {
   return Path.join(ROOT_DIR, "apps/server/dist/index.mjs");
 }
 
-function resolveDesktopStaticDir(): string | null {
-  const candidates = [
-    Path.join(ROOT_DIR, "apps/server/dist/client"),
-    Path.join(ROOT_DIR, "apps/web/dist"),
-  ];
-
-  for (const candidate of candidates) {
-    if (FS.existsSync(Path.join(candidate, "index.html"))) {
-      return candidate;
-    }
-  }
-
-  return null;
-}
-
 function resolveWindowUrl(): string {
   const baseUrl = isDevelopment
     ? process.env.VITE_DEV_SERVER_URL
     : (() => {
-        const staticRoot = resolveDesktopStaticDir();
-        if (!staticRoot) {
-          throw new Error("Desktop static bundle missing. Build apps/server (with bundled client) first.");
+        if (!backendPort) {
+          throw new Error("Desktop runtime missing backend port.");
         }
-        return pathToFileURL(Path.join(staticRoot, "index.html")).toString();
+        return `http://127.0.0.1:${backendPort}/`;
       })();
 
   if (!baseUrl) {
@@ -925,6 +908,7 @@ async function bootstrap(): Promise<void> {
     backendWsUrl = `ws://127.0.0.1:${backendPort}/?token=${encodeURIComponent(backendAuthToken)}`;
     writeDesktopLog(`bootstrap resolved websocket url=${backendWsUrl}`);
     startBackend();
+    await waitForHttpUrl(`http://127.0.0.1:${backendPort}/`, 15_000);
   }
 
   mainWindow = createWindow();
