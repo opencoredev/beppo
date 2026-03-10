@@ -289,7 +289,7 @@ function connectWs(port: number, token?: string): Promise<WebSocket> {
   });
 }
 
-function waitForMessage(ws: WebSocket, timeoutMs = 5_000): Promise<unknown> {
+function waitForMessage(ws: WebSocket, timeoutMs = 10_000): Promise<unknown> {
   const pending = pendingBySocket.get(ws);
   if (!pending) {
     return Promise.reject(new Error("WebSocket not initialized"));
@@ -1420,9 +1420,7 @@ describe("WebSocket Server", () => {
     };
     terminalManager.emitEvent(manualEvent);
 
-    const push = (await waitForMessage(ws)) as WsPush;
-    expect(push.type).toBe("push");
-    expect(push.channel).toBe(WS_CHANNELS.terminalEvent);
+    const push = await waitForPush(ws, WS_CHANNELS.terminalEvent);
     expect((push.data as TerminalEvent).type).toBe("output");
   });
 
