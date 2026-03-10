@@ -70,6 +70,7 @@ const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const isWslRuntime =
   Boolean(process.env.WSL_DISTRO_NAME) ||
   OS.release().toLowerCase().includes("microsoft");
+const useCefRenderer = !isDevelopment;
 
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
 
@@ -685,6 +686,7 @@ function actionResult(accepted: boolean, completed: boolean): DesktopUpdateActio
 async function handleBridgeRequest(envelope: DesktopBridgeRequestEnvelope): Promise<unknown> {
   switch (envelope.method) {
     case PICK_FOLDER_METHOD: {
+      writeDesktopLog("bridge pickFolder start");
       const result: unknown = await Utils.openFileDialog({
         startingFolder:
           process.platform === "win32"
@@ -697,6 +699,9 @@ async function handleBridgeRequest(envelope: DesktopBridgeRequestEnvelope): Prom
       const selected = Array.isArray(result)
         ? result.find((entry: unknown) => typeof entry === "string" && entry.trim().length > 0)
         : null;
+      writeDesktopLog(
+        `bridge pickFolder result=${typeof selected === "string" ? selected : "<empty>"}`,
+      );
       return selected ?? null;
     }
     case CONFIRM_METHOD: {
@@ -829,7 +834,7 @@ function configureContextMenuListener(): void {
 }
 
 function createWindow(): DesktopWindow {
-  const renderer = isWslRuntime ? "cef" : "native";
+  const renderer = useCefRenderer ? "cef" : "native";
   const window = new BrowserWindow({
     title: APP_DISPLAY_NAME,
     frame: {
@@ -840,7 +845,7 @@ function createWindow(): DesktopWindow {
     },
     renderer,
     preload: resolvePreloadPath(),
-    titleBarStyle: isWslRuntime ? "default" : "hiddenInset",
+    titleBarStyle: renderer === "native" && !isWslRuntime ? "hiddenInset" : "default",
     url: resolveWindowUrl(),
     sandbox: false,
   });
