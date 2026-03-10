@@ -16,7 +16,8 @@
     if (!window.__electrobunBunBridge || typeof window.__electrobunBunBridge.postMessage !== "function") {
       throw new Error("Desktop bridge is unavailable.");
     }
-    window.__electrobunBunBridge.postMessage(JSON.stringify(payload), self.location.origin);
+    // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Electrobun host bridge is not window.postMessage.
+    window.__electrobunBunBridge.postMessage(JSON.stringify(payload));
   }
 
   function request(method, params) {
