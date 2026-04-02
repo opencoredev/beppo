@@ -4,13 +4,22 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
-  yield* sql`
-    ALTER TABLE projection_thread_proposed_plans
-    ADD COLUMN implemented_at TEXT
+  const columns = yield* sql<{ readonly name: string }>`
+    PRAGMA table_info(projection_thread_proposed_plans)
   `;
+  const columnNames = new Set(columns.map((c) => c.name));
 
-  yield* sql`
-    ALTER TABLE projection_thread_proposed_plans
-    ADD COLUMN implementation_thread_id TEXT
-  `;
+  if (!columnNames.has("implemented_at")) {
+    yield* sql`
+      ALTER TABLE projection_thread_proposed_plans
+      ADD COLUMN implemented_at TEXT
+    `;
+  }
+
+  if (!columnNames.has("implementation_thread_id")) {
+    yield* sql`
+      ALTER TABLE projection_thread_proposed_plans
+      ADD COLUMN implementation_thread_id TEXT
+    `;
+  }
 });

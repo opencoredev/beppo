@@ -31,10 +31,15 @@ export function nonEmptyTrimmed(value: string | undefined): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-export function isCommandMissingCause(error: unknown): boolean {
+export function isCommandMissingCause(error: unknown, commandName: string): boolean {
   if (!(error instanceof Error)) return false;
   const lower = error.message.toLowerCase();
-  return lower.includes("enoent") || lower.includes("notfound");
+  const name = commandName.toLowerCase();
+  return (
+    lower.includes(`command not found: ${name}`) ||
+    lower.includes(`spawn ${name} enoent`) ||
+    (lower.includes("not found") && lower.includes(name))
+  );
 }
 
 export const spawnAndCollect = (binaryPath: string, command: ChildProcess.Command) =>

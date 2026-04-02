@@ -1,4 +1,6 @@
 import { type ChildProcess as ChildProcessHandle, spawn, spawnSync } from "node:child_process";
+import { statSync } from "node:fs";
+import { extname, join } from "node:path";
 
 export interface ProcessRunOptions {
   cwd?: string | undefined;
@@ -80,10 +82,87 @@ function normalizeBufferError(
 
 const DEFAULT_MAX_BUFFER_BYTES = 8 * 1024 * 1024;
 
+// ---------------------------------------------------------------------------
+// Windows command resolution (replaces shell: true for PATH lookup)
+// ---------------------------------------------------------------------------
+
+function resolveWindowsPathExtensions(env: NodeJS.ProcessEnv): ReadonlyArray<string> {
+  const rawValue = env.PATHEXT;
+  const fallback = [".COM", ".EXE", ".BAT", ".CMD"];
+  if (!rawValue) return fallback;
+
+  const parsed = rawValue
+    .split(";")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+    .map((entry) => (entry.startsWith(".") ? entry.toUpperCase() : `.${entry.toUpperCase()}`));
+  return parsed.length > 0 ? Array.from(new Set(parsed)) : fallback;
+}
+
+function isWindowsExecutable(filePath: string, pathExtensions: ReadonlyArray<string>): boolean {
+  try {
+    const stat = statSync(filePath);
+    if (!stat.isFile()) return false;
+    const ext = extname(filePath);
+    if (ext.length === 0) return false;
+    return pathExtensions.includes(ext.toUpperCase());
+  } catch {
+    return false;
+  }
+}
+
 /**
- * On Windows with `shell: true`, `child.kill()` only terminates the `cmd.exe`
- * wrapper, leaving the actual command running. Use `taskkill /T` to kill the
- * entire process tree instead.
+ * Resolve a bare command name to a fully-qualified path on Windows by
+ * searching PATH and PATHEXT, matching what `cmd.exe` would do.
+ *
+ * Returns the original command unchanged on non-Windows platforms or when
+ * the command already contains a path separator.
+ */
+function resolveCommandForPlatform(
+  command: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  if (process.platform !== "win32") return command;
+  if (command.includes("/") || command.includes("\\")) return command;
+
+  const pathExtensions = resolveWindowsPathExtensions(env);
+  const ext = extname(command).toUpperCase();
+
+  // Build candidate names (with PATHEXT variants)
+  const candidates: string[] = [];
+  if (ext.length > 0 && pathExtensions.includes(ext)) {
+    candidates.push(command);
+  } else {
+    for (const pe of pathExtensions) {
+      candidates.push(`${command}${pe}`);
+      candidates.push(`${command}${pe.toLowerCase()}`);
+    }
+  }
+
+  const pathValue = env.PATH ?? env.Path ?? env.path ?? "";
+  if (pathValue.length === 0) return command;
+
+  const pathEntries = pathValue
+    .split(";")
+    .map((entry) => entry.replace(/^"+|"+$/g, "").trim())
+    .filter((entry) => entry.length > 0);
+
+  for (const dir of pathEntries) {
+    for (const candidate of candidates) {
+      const fullPath = join(dir, candidate);
+      if (isWindowsExecutable(fullPath, pathExtensions)) {
+        return fullPath;
+      }
+    }
+  }
+
+  // Fallback: return the original command and let spawn report the error.
+  return command;
+}
+
+/**
+ * On Windows `child.kill()` only terminates the immediate process.
+ * Use `taskkill /T` to kill the entire process tree.
  */
 function killChild(child: ChildProcessHandle, signal: NodeJS.Signals = "SIGTERM"): void {
   if (process.platform === "win32" && child.pid !== undefined) {
@@ -135,11 +214,11 @@ export async function runProcess(
   const outputMode = options.outputMode ?? "error";
 
   return new Promise<ProcessRunResult>((resolve, reject) => {
-    const child = spawn(command, args, {
+    const resolvedCommand = resolveCommandForPlatform(command, options.env);
+    const child = spawn(resolvedCommand, args, {
       cwd: options.cwd,
       env: options.env,
       stdio: "pipe",
-      shell: process.platform === "win32",
     });
 
     let stdout = "";

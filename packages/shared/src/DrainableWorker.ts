@@ -55,12 +55,14 @@ export const makeDrainableWorker = <A, E, R>(
 
     const drain: DrainableWorker<A>["drain"] = TxRef.get(outstanding).pipe(
       Effect.tap((n) => (n > 0 ? Effect.txRetry : Effect.void)),
+      Effect.asVoid,
       Effect.tx,
     );
 
-    const enqueue = (element: A): Effect.Effect<boolean, never, never> =>
+    const enqueue = (element: A): Effect.Effect<void> =>
       TxQueue.offer(queue, element).pipe(
         Effect.tap(() => TxRef.update(outstanding, (n) => n + 1)),
+        Effect.asVoid,
         Effect.tx,
       );
 

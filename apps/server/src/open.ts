@@ -124,23 +124,30 @@ function resolvePathDelimiter(platform: NodeJS.Platform): string {
   return platform === "win32" ? ";" : ":";
 }
 
-export function isCommandAvailable(
+/**
+ * Resolve the full filesystem path for a command by searching PATH (and
+ * PATHEXT on Windows).  Returns `undefined` when the command cannot be found.
+ */
+export function resolveCommandPath(
   command: string,
   options: CommandAvailabilityOptions = {},
-): boolean {
+): string | undefined {
   const platform = options.platform ?? process.platform;
   const env = options.env ?? process.env;
   const windowsPathExtensions = platform === "win32" ? resolveWindowsPathExtensions(env) : [];
   const commandCandidates = resolveCommandCandidates(command, platform, windowsPathExtensions);
 
   if (command.includes("/") || command.includes("\\")) {
-    return commandCandidates.some((candidate) =>
-      isExecutableFile(candidate, platform, windowsPathExtensions),
-    );
+    for (const candidate of commandCandidates) {
+      if (isExecutableFile(candidate, platform, windowsPathExtensions)) {
+        return candidate;
+      }
+    }
+    return undefined;
   }
 
   const pathValue = resolvePathEnvironmentVariable(env);
-  if (pathValue.length === 0) return false;
+  if (pathValue.length === 0) return undefined;
   const pathEntries = pathValue
     .split(resolvePathDelimiter(platform))
     .map((entry) => stripWrappingQuotes(entry.trim()))
@@ -148,12 +155,20 @@ export function isCommandAvailable(
 
   for (const pathEntry of pathEntries) {
     for (const candidate of commandCandidates) {
-      if (isExecutableFile(join(pathEntry, candidate), platform, windowsPathExtensions)) {
-        return true;
+      const fullPath = join(pathEntry, candidate);
+      if (isExecutableFile(fullPath, platform, windowsPathExtensions)) {
+        return fullPath;
       }
     }
   }
-  return false;
+  return undefined;
+}
+
+export function isCommandAvailable(
+  command: string,
+  options: CommandAvailabilityOptions = {},
+): boolean {
+  return resolveCommandPath(command, options) !== undefined;
 }
 
 export function resolveAvailableEditors(
@@ -222,17 +237,17 @@ export const resolveEditorLaunch = Effect.fnUntraced(function* (
 
 export const launchDetached = (launch: EditorLaunch) =>
   Effect.gen(function* () {
-    if (!isCommandAvailable(launch.command)) {
+    const resolvedPath = resolveCommandPath(launch.command);
+    if (!resolvedPath) {
       return yield* new OpenError({ message: `Editor command not found: ${launch.command}` });
     }
 
     yield* Effect.callback<void, OpenError>((resume) => {
       let child;
       try {
-        child = spawn(launch.command, [...launch.args], {
+        child = spawn(resolvedPath, [...launch.args], {
           detached: true,
           stdio: "ignore",
-          shell: process.platform === "win32",
         });
       } catch (error) {
         return resume(

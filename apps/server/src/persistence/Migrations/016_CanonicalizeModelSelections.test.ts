@@ -197,6 +197,20 @@ layer("016_CanonicalizeModelSelections", (it) => {
           'user',
           '{"threadId":"thread-3","projectId":"project-1","title":"Ancient Thread","runtimeMode":"full-access","interactionMode":"default","branch":null,"worktreePath":null,"createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z"}',
           '{}'
+        ),
+        (
+          'event-thread-created-null-model',
+          'thread',
+          'thread-4',
+          1,
+          'thread.created',
+          '2026-01-01T00:00:00.000Z',
+          'command-thread-created-null-model',
+          NULL,
+          'correlation-thread-created-null-model',
+          'user',
+          '{"threadId":"thread-4","projectId":"project-1","title":"Null Model Thread","model":null,"runtimeMode":"full-access","interactionMode":"default","branch":null,"worktreePath":null,"createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z"}',
+          '{}'
         )
       `;
         }
@@ -368,6 +382,20 @@ layer("016_CanonicalizeModelSelections", (it) => {
               provider: "codex",
               model: "gpt-5.4",
             },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          });
+
+          // Thread event with JSON null model should produce null modelSelection
+          assert.deepStrictEqual(JSON.parse(eventRows[7]!.payloadJson), {
+            threadId: "thread-4",
+            projectId: "project-1",
+            title: "Null Model Thread",
+            modelSelection: null,
             runtimeMode: "full-access",
             interactionMode: "default",
             branch: null,

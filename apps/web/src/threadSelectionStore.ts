@@ -34,7 +34,7 @@ interface ThreadSelectionStore extends ThreadSelectionState {
   hasSelection: () => boolean;
 }
 
-const EMPTY_SET = new Set<ThreadId>();
+const EMPTY_SET: ReadonlySet<ThreadId> = Object.freeze(new Set<ThreadId>());
 
 export const useThreadSelectionStore = create<ThreadSelectionStore>((set, get) => ({
   selectedThreadIds: EMPTY_SET,

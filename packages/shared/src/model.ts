@@ -234,7 +234,7 @@ export function applyClaudePromptEffortPrefix(
   if (effort !== "ultrathink") {
     return trimmed;
   }
-  if (trimmed.startsWith("Ultrathink:")) {
+  if (trimmed.toLowerCase().startsWith("ultrathink:")) {
     return trimmed;
   }
   return `Ultrathink:\n${trimmed}`;

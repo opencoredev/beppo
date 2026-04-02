@@ -59,7 +59,36 @@ const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
 const UPDATE_CHECK_CHANNEL = "desktop:update-check";
 const GET_WS_URL_CHANNEL = "desktop:get-ws-url";
-const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
+
+// ---------------------------------------------------------------------------
+// T3CODE_STATE_DIR backward-compatibility
+// ---------------------------------------------------------------------------
+// The old env var `T3CODE_STATE_DIR` pointed directly at the state directory,
+// whereas `T3CODE_HOME` points at the parent base directory with `userdata/`
+// appended.  If the caller still uses the legacy var, derive BASE_DIR so that
+// `Path.join(BASE_DIR, "userdata")` resolves to the same location.
+// ---------------------------------------------------------------------------
+function resolveBaseDirectory(): string {
+  const home = process.env.T3CODE_HOME?.trim();
+  if (home) return home;
+
+  const legacyStateDir = process.env.T3CODE_STATE_DIR?.trim();
+  if (legacyStateDir) {
+    console.warn(
+      "[desktop] T3CODE_STATE_DIR is deprecated and will be removed in a future release. " +
+        "Use T3CODE_HOME instead (the parent of the userdata directory). " +
+        `Mapping T3CODE_STATE_DIR="${legacyStateDir}" → T3CODE_HOME="${Path.dirname(legacyStateDir)}"`,
+    );
+    // T3CODE_STATE_DIR pointed at the state dir itself (e.g. ~/.t3/userdata).
+    // BASE_DIR should be the parent so that Path.join(BASE_DIR, "userdata")
+    // matches the original path.
+    return Path.dirname(legacyStateDir);
+  }
+
+  return Path.join(OS.homedir(), ".t3");
+}
+
+const BASE_DIR = resolveBaseDirectory();
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_SCHEME = "t3";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
@@ -119,6 +148,16 @@ function logScope(scope: string): string {
 
 function sanitizeLogValue(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Mask a secret value for safe logging.  Shows the first 4 characters
+ * followed by `***` so operators can correlate values without exposing
+ * the full secret.  Returns `"<empty>"` for blank strings.
+ */
+function maskSecret(value: string): string {
+  if (value.length === 0) return "<empty>";
+  return `${value.slice(0, 4)}***`;
 }
 
 function backendChildEnv(): NodeJS.ProcessEnv {
@@ -1406,7 +1445,9 @@ async function bootstrap(): Promise<void> {
   backendAuthToken = Crypto.randomBytes(24).toString("hex");
   const baseUrl = `ws://127.0.0.1:${backendPort}`;
   backendWsUrl = `${baseUrl}/?token=${encodeURIComponent(backendAuthToken)}`;
-  writeDesktopLogHeader(`bootstrap resolved websocket endpoint baseUrl=${baseUrl}`);
+  writeDesktopLogHeader(
+    `bootstrap resolved websocket endpoint baseUrl=${baseUrl} authToken=${maskSecret(backendAuthToken)}`,
+  );
 
   registerIpcHandlers();
   writeDesktopLogHeader("bootstrap ipc handlers registered");

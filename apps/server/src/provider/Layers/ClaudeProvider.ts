@@ -481,11 +481,11 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       checkedAt,
       models,
       probe: {
-        installed: !isCommandMissingCause(error),
+        installed: !isCommandMissingCause(error, claudeSettings.binaryPath),
         version: null,
         status: "error",
         auth: { status: "unknown" },
-        message: isCommandMissingCause(error)
+        message: isCommandMissingCause(error, claudeSettings.binaryPath)
           ? "Claude Agent CLI (`claude`) is not installed or not on PATH."
           : `Failed to execute Claude Agent CLI health check: ${error instanceof Error ? error.message : String(error)}.`,
       },

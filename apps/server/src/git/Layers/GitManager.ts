@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 
 import { Cache, Duration, Effect, Exit, FileSystem, Layer, Option, Path, Ref } from "effect";
 import {
@@ -494,13 +494,8 @@ function normalizePullRequestReference(reference: string): string {
   return hashNumber?.[1] ?? trimmed;
 }
 
-function canonicalizeExistingPath(value: string): string {
-  try {
-    return realpathSync.native(value);
-  } catch {
-    return value;
-  }
-}
+const canonicalizeExistingPath = (value: string): Effect.Effect<string> =>
+  Effect.tryPromise(() => realpath(value)).pipe(Effect.orElseSucceed(() => value));
 
 function toResolvedPullRequest(pr: {
   number: number;
@@ -717,7 +712,9 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
     timeToLive: (exit) => (Exit.isSuccess(exit) ? STATUS_RESULT_CACHE_TTL : Duration.zero),
   });
   const invalidateStatusResultCache = (cwd: string) =>
-    Cache.invalidate(statusResultCache, normalizeStatusCacheKey(cwd));
+    normalizeStatusCacheKey(cwd).pipe(
+      Effect.flatMap((key) => Cache.invalidate(statusResultCache, key)),
+    );
 
   const readConfigValueNullable = (cwd: string, key: string) =>
     gitCore.readConfigValue(cwd, key).pipe(Effect.catch(() => Effect.succeed(null)));
@@ -1285,7 +1282,8 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
   });
 
   const status: GitManagerShape["status"] = Effect.fn("status")(function* (input) {
-    return yield* Cache.get(statusResultCache, normalizeStatusCacheKey(input.cwd));
+    const key = yield* normalizeStatusCacheKey(input.cwd);
+    return yield* Cache.get(statusResultCache, key);
   });
 
   const resolvePullRequest: GitManagerShape["resolvePullRequest"] = Effect.fn("resolvePullRequest")(
@@ -1306,7 +1304,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
   )(function* (input) {
     return yield* Effect.gen(function* () {
       const normalizedReference = normalizePullRequestReference(input.reference);
-      const rootWorktreePath = canonicalizeExistingPath(input.cwd);
+      const rootWorktreePath = yield* canonicalizeExistingPath(input.cwd);
       const pullRequestSummary = yield* gitHubCli.getPullRequest({
         cwd: input.cwd,
         reference: normalizedReference,
@@ -1358,31 +1356,38 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
 
       const findLocalHeadBranch = (cwd: string) =>
         gitCore.listBranches({ cwd }).pipe(
-          Effect.map((result) => {
+          Effect.flatMap((result) => {
             const localBranch = result.branches.find(
               (branch) => !branch.isRemote && branch.name === localPullRequestBranch,
             );
             if (localBranch) {
-              return localBranch;
+              return Effect.succeed(localBranch);
             }
             if (localPullRequestBranch === pullRequest.headBranch) {
-              return null;
+              return Effect.succeed(null);
             }
-            return (
-              result.branches.find(
-                (branch) =>
-                  !branch.isRemote &&
-                  branch.name === pullRequest.headBranch &&
-                  branch.worktreePath !== null &&
-                  canonicalizeExistingPath(branch.worktreePath) !== rootWorktreePath,
-              ) ?? null
+            // Resolve worktree paths asynchronously to avoid blocking the event loop.
+            const candidates = result.branches.filter(
+              (branch) =>
+                !branch.isRemote &&
+                branch.name === pullRequest.headBranch &&
+                branch.worktreePath !== null,
             );
+            return Effect.gen(function* () {
+              for (const branch of candidates) {
+                const resolved = yield* canonicalizeExistingPath(branch.worktreePath!);
+                if (resolved !== rootWorktreePath) {
+                  return branch;
+                }
+              }
+              return null;
+            });
           }),
         );
 
       const existingBranchBeforeFetch = yield* findLocalHeadBranch(input.cwd);
       const existingBranchBeforeFetchPath = existingBranchBeforeFetch?.worktreePath
-        ? canonicalizeExistingPath(existingBranchBeforeFetch.worktreePath)
+        ? yield* canonicalizeExistingPath(existingBranchBeforeFetch.worktreePath)
         : null;
       if (
         existingBranchBeforeFetch?.worktreePath &&
@@ -1410,7 +1415,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
 
       const existingBranchAfterFetch = yield* findLocalHeadBranch(input.cwd);
       const existingBranchAfterFetchPath = existingBranchAfterFetch?.worktreePath
-        ? canonicalizeExistingPath(existingBranchAfterFetch.worktreePath)
+        ? yield* canonicalizeExistingPath(existingBranchAfterFetch.worktreePath)
         : null;
       if (
         existingBranchAfterFetch?.worktreePath &&

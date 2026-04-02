@@ -1207,9 +1207,11 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     "prepareCommitContext",
   )(function* (cwd, filePaths) {
     if (filePaths && filePaths.length > 0) {
-      yield* runGit("GitCore.prepareCommitContext.reset", cwd, ["reset"]).pipe(
-        Effect.catch(() => Effect.void),
-      );
+      yield* runGit("GitCore.prepareCommitContext.resetSelected", cwd, [
+        "reset",
+        "--",
+        ...filePaths,
+      ]).pipe(Effect.catch(() => Effect.void));
       yield* runGit("GitCore.prepareCommitContext.addSelected", cwd, [
         "add",
         "-A",

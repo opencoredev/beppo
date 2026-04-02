@@ -122,7 +122,7 @@ export function PullRequestThreadDialog({
         setReferenceDirty(true);
         return;
       }
-      if (!parsedReference || !resolvedPullRequest || !cwd) {
+      if (!resolvedPullRequest || !cwd) {
         return;
       }
       setPreparingMode(mode);

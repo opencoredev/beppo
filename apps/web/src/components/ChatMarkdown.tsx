@@ -24,6 +24,28 @@ import { useTheme } from "../hooks/useTheme";
 import { resolveMarkdownFileLinkTarget } from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
 
+/**
+ * Sanitize HTML to prevent XSS by stripping script elements and inline event
+ * handler attributes. Uses the browser-native DOMParser so no extra dependency
+ * is required.
+ */
+function sanitizeHtml(html: string): string {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  // Remove all <script> elements
+  const scripts = doc.querySelectorAll("script");
+  scripts.forEach((s) => s.remove());
+  // Strip event-handler attributes (onclick, onerror, onload, etc.)
+  const allElements = doc.querySelectorAll("*");
+  allElements.forEach((el) => {
+    for (const attr of Array.from(el.attributes)) {
+      if (attr.name.startsWith("on")) {
+        el.removeAttribute(attr.name);
+      }
+    }
+  });
+  return doc.body.innerHTML;
+}
+
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
   { hasError: boolean }
@@ -200,7 +222,7 @@ function SuspenseShikiCodeBlock({
     return (
       <div
         className="chat-markdown-shiki"
-        dangerouslySetInnerHTML={{ __html: cachedHighlightedHtml }}
+        dangerouslySetInnerHTML={{ __html: sanitizeHtml(cachedHighlightedHtml) }}
       />
     );
   }
@@ -231,7 +253,7 @@ function SuspenseShikiCodeBlock({
   }, [cacheKey, code, highlightedHtml, isStreaming]);
 
   return (
-    <div className="chat-markdown-shiki" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+    <div className="chat-markdown-shiki" dangerouslySetInnerHTML={{ __html: sanitizeHtml(highlightedHtml) }} />
   );
 }
 

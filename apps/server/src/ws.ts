@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { Effect, Layer, Option, Queue, Ref, Schema, Stream } from "effect";
 import {
   type GitActionProgressEvent,
@@ -36,6 +37,30 @@ import { TerminalManager } from "./terminal/Services/Manager";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths";
+
+function safeTokenCompare(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
+
+const ALLOWED_ORIGIN_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+function isAllowedOrigin(origin: string | undefined, devUrl?: string): boolean {
+  if (!origin) return true; // non-browser clients
+  try {
+    const url = new URL(origin);
+    if (ALLOWED_ORIGIN_HOSTNAMES.has(url.hostname)) return true;
+    if (devUrl) {
+      const dev = new URL(devUrl);
+      if (url.origin === dev.origin) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
 
 const WsRpcLayer = WsRpcGroup.toLayer(
   Effect.gen(function* () {
@@ -326,13 +351,20 @@ export const websocketRpcRouteLayer = Layer.unwrap(
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const config = yield* ServerConfig;
+        const origin = HttpServerRequest.toURL(request).pipe(
+          Option.map((u) => u.searchParams.get("origin") ?? undefined),
+          Option.getOrUndefined,
+        ) ?? request.headers["origin"];
+        if (!isAllowedOrigin(origin, config.devUrl?.toString())) {
+          return HttpServerResponse.text("Forbidden origin", { status: 403 });
+        }
         if (config.authToken) {
           const url = HttpServerRequest.toURL(request);
           if (Option.isNone(url)) {
             return HttpServerResponse.text("Invalid WebSocket URL", { status: 400 });
           }
           const token = url.value.searchParams.get("token");
-          if (token !== config.authToken) {
+          if (!token || !safeTokenCompare(token, config.authToken)) {
             return HttpServerResponse.text("Unauthorized WebSocket connection", { status: 401 });
           }
         }

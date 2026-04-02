@@ -193,7 +193,7 @@ const PlanSidebar = memo(function PlanSidebar({
               </p>
               {activePlan.steps.map((step) => (
                 <div
-                  key={`${step.status}:${step.step}`}
+                  key={step.step}
                   className={cn(
                     "flex items-start gap-2.5 rounded-lg px-2.5 py-2 transition-colors duration-200",
                     step.status === "inProgress" && "bg-blue-500/5",

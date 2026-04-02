@@ -77,6 +77,31 @@ import { ClaudeAdapter, type ClaudeAdapterShape } from "../Services/ClaudeAdapte
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = "claudeAgent" as const;
+
+/**
+ * Environment variable keys that must NOT be forwarded to Claude subprocesses.
+ * These contain server-side secrets that the subprocess has no legitimate need
+ * to access.
+ */
+const SENSITIVE_ENV_KEYS = [
+  "T3CODE_AUTH_TOKEN",
+  "DATABASE_URL",
+  "SECRET_KEY",
+  "T3CODE_POSTHOG_KEY",
+] as const;
+
+/**
+ * Returns a shallow copy of `process.env` with sensitive keys stripped so that
+ * spawned Claude subprocesses never receive server-side secrets.
+ */
+function createSafeSubprocessEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of SENSITIVE_ENV_KEYS) {
+    delete env[key];
+  }
+  return env;
+}
+
 type ClaudeTextStreamKind = Extract<RuntimeContentStreamKind, "assistant_text" | "reasoning_text">;
 type ClaudeToolResultStreamKind = Extract<
   RuntimeContentStreamKind,
@@ -2293,6 +2318,12 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
     context.pendingApprovals.clear();
 
+    // Resolve any pending user-input deferreds so callers don't hang.
+    for (const [, pendingInput] of context.pendingUserInputs) {
+      yield* Deferred.succeed(pendingInput.answers, {} as ProviderUserInputAnswers);
+    }
+    context.pendingUserInputs.clear();
+
     if (context.turnState) {
       yield* completeTurn(context, "interrupted", "Session stopped.");
     }
@@ -2714,7 +2745,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
-        env: process.env,
+        env: createSafeSubprocessEnv(),
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
       };
 
@@ -2818,7 +2849,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       });
 
       let streamFiber: Fiber.Fiber<void, never>;
-      streamFiber = runFork(
+      streamFiber = yield* Effect.forkDetach(
         Effect.exit(runSdkStream(context)).pipe(
           Effect.flatMap((exit) => {
             if (context.stopped) {

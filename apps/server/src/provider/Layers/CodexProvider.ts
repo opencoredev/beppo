@@ -370,11 +370,11 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
       checkedAt,
       models,
       probe: {
-        installed: !isCommandMissingCause(error),
+        installed: !isCommandMissingCause(error, codexSettings.binaryPath),
         version: null,
         status: "error",
         auth: { status: "unknown" },
-        message: isCommandMissingCause(error)
+        message: isCommandMissingCause(error, codexSettings.binaryPath)
           ? "Codex CLI (`codex`) is not installed or not on PATH."
           : `Failed to execute Codex CLI health check: ${error instanceof Error ? error.message : String(error)}.`,
       },

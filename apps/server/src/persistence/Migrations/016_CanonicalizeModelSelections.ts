@@ -4,10 +4,33 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
-  yield* sql`
-    ALTER TABLE projection_projects
-    ADD COLUMN default_model_selection_json TEXT
+  // --- Phase 1: Add new columns (idempotent) ---
+
+  const projectColumns = yield* sql<{ readonly name: string }>`
+    PRAGMA table_info(projection_projects)
   `;
+  const projectColumnNames = new Set(projectColumns.map((c) => c.name));
+
+  if (!projectColumnNames.has("default_model_selection_json")) {
+    yield* sql`
+      ALTER TABLE projection_projects
+      ADD COLUMN default_model_selection_json TEXT
+    `;
+  }
+
+  const threadColumns = yield* sql<{ readonly name: string }>`
+    PRAGMA table_info(projection_threads)
+  `;
+  const threadColumnNames = new Set(threadColumns.map((c) => c.name));
+
+  if (!threadColumnNames.has("model_selection_json")) {
+    yield* sql`
+      ALTER TABLE projection_threads
+      ADD COLUMN model_selection_json TEXT
+    `;
+  }
+
+  // --- Phase 2: Backfill projection tables ---
 
   yield* sql`
     UPDATE projection_projects
@@ -24,11 +47,6 @@ export default Effect.gen(function* () {
       )
     END
     WHERE default_model_selection_json IS NULL
-  `;
-
-  yield* sql`
-    ALTER TABLE projection_threads
-    ADD COLUMN model_selection_json TEXT
   `;
 
   yield* sql`
@@ -53,16 +71,36 @@ export default Effect.gen(function* () {
     WHERE model_selection_json IS NULL
   `;
 
-  yield* sql`
-    ALTER TABLE projection_projects
-    DROP COLUMN default_model
-  `;
+  // --- Phase 3: Drop legacy columns (idempotent) ---
 
-  yield* sql`
-    ALTER TABLE projection_threads
-    DROP COLUMN model
+  // Re-read column info after ALTER TABLEs above may have changed the schema
+  const projectColumnsAfter = yield* sql<{ readonly name: string }>`
+    PRAGMA table_info(projection_projects)
   `;
+  const projectColumnNamesAfter = new Set(projectColumnsAfter.map((c) => c.name));
 
+  if (projectColumnNamesAfter.has("default_model")) {
+    yield* sql`
+      ALTER TABLE projection_projects
+      DROP COLUMN default_model
+    `;
+  }
+
+  const threadColumnsAfter = yield* sql<{ readonly name: string }>`
+    PRAGMA table_info(projection_threads)
+  `;
+  const threadColumnNamesAfter = new Set(threadColumnsAfter.map((c) => c.name));
+
+  if (threadColumnNamesAfter.has("model")) {
+    yield* sql`
+      ALTER TABLE projection_threads
+      DROP COLUMN model
+    `;
+  }
+
+  // --- Phase 4: Migrate orchestration event payloads ---
+
+  // Project events: handle both JSON null and non-null defaultModel
   yield* sql`
     UPDATE orchestration_events
     SET payload_json = CASE
@@ -147,6 +185,7 @@ export default Effect.gen(function* () {
       AND json_type(payload_json, '$.defaultModel') IS NOT NULL
   `;
 
+  // Thread events: handle non-null model values only (not JSON null)
   yield* sql`
     UPDATE orchestration_events
     SET payload_json = json_remove(
@@ -218,6 +257,21 @@ export default Effect.gen(function* () {
     WHERE event_type IN ('thread.created', 'thread.meta-updated', 'thread.turn-start-requested')
       AND json_type(payload_json, '$.modelSelection') IS NULL
       AND json_type(payload_json, '$.model') IS NOT NULL
+      AND json_type(payload_json, '$.model') != 'null'
+  `;
+
+  // Thread events with JSON null model: set modelSelection to null and clean up legacy fields
+  yield* sql`
+    UPDATE orchestration_events
+    SET payload_json = json_remove(
+      json_set(payload_json, '$.modelSelection', json('null')),
+      '$.provider',
+      '$.model',
+      '$.modelOptions'
+    )
+    WHERE event_type IN ('thread.created', 'thread.meta-updated', 'thread.turn-start-requested')
+      AND json_type(payload_json, '$.modelSelection') IS NULL
+      AND json_type(payload_json, '$.model') = 'null'
   `;
 
   // Backfill thread.created events that predate the model field entirely

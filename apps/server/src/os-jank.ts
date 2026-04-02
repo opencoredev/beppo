@@ -38,8 +38,26 @@ export const expandHomePath = Effect.fn(function* (input: string) {
 });
 
 export const resolveBaseDir = Effect.fn(function* (raw: string | undefined) {
-  const { join, resolve } = yield* Path.Path;
+  const { dirname, join, resolve } = yield* Path.Path;
+
+  // Legacy: T3CODE_STATE_DIR pointed directly at the state directory.
+  // The new T3CODE_HOME is its parent (state dir = T3CODE_HOME/userdata).
+  // Honour the old variable when no explicit base dir is provided so users
+  // with a custom T3CODE_STATE_DIR don't silently lose data.
   if (!raw || raw.trim().length === 0) {
+    const legacyStateDir = process.env.T3CODE_STATE_DIR?.trim();
+    if (legacyStateDir && legacyStateDir.length > 0) {
+      yield* Effect.logWarning(
+        "T3CODE_STATE_DIR is deprecated. Use T3CODE_HOME instead.",
+      );
+      const resolved = resolve(yield* expandHomePath(legacyStateDir));
+      // Strip a trailing /userdata (or \userdata) segment so the derived
+      // stateDir (baseDir + "/userdata") resolves back to the same location.
+      const suffix = "/userdata";
+      return resolved.endsWith(suffix)
+        ? resolved.slice(0, -suffix.length)
+        : dirname(resolved);
+    }
     return join(OS.homedir(), ".t3");
   }
   return resolve(yield* expandHomePath(raw.trim()));

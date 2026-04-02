@@ -69,7 +69,7 @@ export const makeKeyedCoalescingWorker = <K, V, E, R>(options: {
       }).pipe(
         Effect.tx,
         Effect.flatMap((shouldRequeue) =>
-          shouldRequeue ? TxQueue.offer(queue, key) : Effect.void,
+          shouldRequeue ? TxQueue.offer(queue, key).pipe(Effect.tx, Effect.asVoid) : Effect.void,
         ),
       );
 
@@ -93,8 +93,9 @@ export const makeKeyedCoalescingWorker = <K, V, E, R>(options: {
             { key, value } as const,
             { ...state, latestByKey, queuedKeys, activeKeys },
           ] as const;
-        }).pipe(Effect.tx),
+        }),
       ),
+      Effect.tx,
       Effect.flatMap((item) =>
         item === null
           ? Effect.void

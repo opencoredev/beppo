@@ -203,7 +203,7 @@ export type GitStatusResult = typeof GitStatusResult.Type;
 export const GitListBranchesResult = Schema.Struct({
   branches: Schema.Array(GitBranch),
   isRepo: Schema.Boolean,
-  hasOriginRemote: Schema.Boolean,
+  hasOriginRemote: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
 });
 export type GitListBranchesResult = typeof GitListBranchesResult.Type;
 

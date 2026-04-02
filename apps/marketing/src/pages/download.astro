@@ -57,6 +57,44 @@ import Layout from "../layouts/Layout.astro";
     </section>
   </div>
 
+  <!-- macOS quick-install -->
+  <section class="install-section">
+    <h2 class="install-heading">Quick install (macOS)</h2>
+    <p class="install-desc">
+      Paste this into Terminal to download and install the latest release:
+    </p>
+    <div class="code-block">
+      <pre><code id="install-cmd">curl -fsSL https://t3code.app/install.sh | bash</code></pre>
+      <button class="copy-btn" data-target="install-cmd" aria-label="Copy to clipboard">
+        <svg class="copy-icon copy-icon--default" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        <svg class="copy-icon copy-icon--done" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      </button>
+    </div>
+  </section>
+
+  <!-- macOS Gatekeeper notice -->
+  <section class="gatekeeper-section">
+    <h2 class="gatekeeper-heading">macOS says the app can&rsquo;t be opened?</h2>
+    <p class="gatekeeper-desc">
+      T3 Code is not yet signed through Apple&rsquo;s notarization service, so
+      macOS Gatekeeper will quarantine it after download. To fix this:
+    </p>
+    <ol class="gatekeeper-steps">
+      <li>Move <strong>T3 Code (Alpha)</strong> to your <strong>/Applications</strong> folder (if it isn&rsquo;t there already).</li>
+      <li>Open <strong>Terminal</strong> and run:</li>
+    </ol>
+    <div class="code-block">
+      <pre><code id="xattr-cmd">xattr -rd com.apple.quarantine "/Applications/T3 Code (Alpha).app"</code></pre>
+      <button class="copy-btn" data-target="xattr-cmd" aria-label="Copy to clipboard">
+        <svg class="copy-icon copy-icon--default" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        <svg class="copy-icon copy-icon--done" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      </button>
+    </div>
+    <ol class="gatekeeper-steps" start="3">
+      <li>Open the app normally. You only need to do this once.</li>
+    </ol>
+  </section>
+
   <p class="releases-link">
     Looking for older versions? Check the
     <a href="https://github.com/pingdotgg/t3code/releases" target="_blank" rel="noopener noreferrer">
@@ -107,6 +145,22 @@ import Layout from "../layouts/Layout.astro";
   }
 
   init();
+
+  /* ── Copy-to-clipboard buttons ── */
+  document.querySelectorAll<HTMLButtonElement>(".copy-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const target = document.getElementById(btn.dataset.target ?? "");
+      if (!target) return;
+
+      try {
+        await navigator.clipboard.writeText(target.textContent ?? "");
+        btn.classList.add("copied");
+        setTimeout(() => btn.classList.remove("copied"), 2000);
+      } catch {
+        /* clipboard API unavailable — silent fail */
+      }
+    });
+  });
 </script>
 
 <style>
@@ -253,6 +307,126 @@ import Layout from "../layouts/Layout.astro";
     text-decoration-color: var(--fg);
   }
 
+  /* ── Quick-install section ── */
+
+  .install-section {
+    width: 100%;
+    max-width: 720px;
+    margin-top: 3.5rem;
+    opacity: 0;
+    animation: fade-in 1s ease-out 0.3s forwards;
+  }
+
+  .install-heading {
+    font-weight: 500;
+    font-size: 1.1rem;
+    letter-spacing: -0.01em;
+    margin-bottom: 0.5rem;
+  }
+
+  .install-desc {
+    font-size: 0.875rem;
+    color: var(--fg-dim);
+    margin-bottom: 0.75rem;
+  }
+
+  /* ── Code block (shared by install + gatekeeper) ── */
+
+  .code-block {
+    position: relative;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+    padding-right: 3rem;
+    overflow-x: auto;
+  }
+
+  .code-block pre {
+    margin: 0;
+  }
+
+  .code-block code {
+    font-family: "SF Mono", "Fira Code", "Fira Mono", "Roboto Mono", "Menlo", monospace;
+    font-size: 0.825rem;
+    line-height: 1.5;
+    color: var(--fg-muted);
+    white-space: pre;
+  }
+
+  .copy-btn {
+    position: absolute;
+    top: 50%;
+    right: 0.65rem;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--fg-dim);
+    cursor: pointer;
+    transition: color 0.2s ease, background 0.2s ease;
+  }
+
+  .copy-btn:hover {
+    color: var(--fg);
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .copy-icon--done {
+    display: none;
+  }
+
+  .copy-btn.copied .copy-icon--default {
+    display: none;
+  }
+
+  .copy-btn.copied .copy-icon--done {
+    display: block;
+    color: #4ade80;
+  }
+
+  /* ── Gatekeeper section ── */
+
+  .gatekeeper-section {
+    width: 100%;
+    max-width: 720px;
+    margin-top: 2.5rem;
+    opacity: 0;
+    animation: fade-in 1s ease-out 0.35s forwards;
+  }
+
+  .gatekeeper-heading {
+    font-weight: 500;
+    font-size: 1.1rem;
+    letter-spacing: -0.01em;
+    margin-bottom: 0.5rem;
+  }
+
+  .gatekeeper-desc {
+    font-size: 0.875rem;
+    color: var(--fg-dim);
+    line-height: 1.6;
+    margin-bottom: 0.75rem;
+  }
+
+  .gatekeeper-steps {
+    font-size: 0.875rem;
+    color: var(--fg-dim);
+    line-height: 1.7;
+    padding-left: 1.25rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .gatekeeper-steps strong {
+    color: var(--fg-muted);
+    font-weight: 500;
+  }
+
   /* ── Mobile ── */
 
   @media (max-width: 640px) {
@@ -266,6 +440,14 @@ import Layout from "../layouts/Layout.astro";
 
     .download-cards {
       grid-template-columns: 1fr;
+    }
+
+    .code-block {
+      padding-right: 2.5rem;
+    }
+
+    .code-block code {
+      font-size: 0.75rem;
     }
   }
 </style>
