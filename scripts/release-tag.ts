@@ -79,7 +79,9 @@ const remoteTag = runGit(["ls-remote", "--tags", "origin", `refs/tags/${tag}`], 
   allowFailure: true,
 });
 if (remoteTag.length > 0) {
-  fail(`Tag '${tag}' already exists on origin. Pull the tag locally or choose a different version.`);
+  fail(
+    `Tag '${tag}' already exists on origin. Pull the tag locally or choose a different version.`,
+  );
 }
 
 console.log(`[release-tag] Creating annotated tag ${tag}...`);

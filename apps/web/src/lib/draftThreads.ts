@@ -51,12 +51,7 @@ function syncDraftThreadContext(
   const hasEnvModeOption = options?.envMode !== undefined;
   const hasRuntimeModeOption = options?.runtimeMode !== undefined;
 
-  if (
-    !hasBranchOption &&
-    !hasWorktreePathOption &&
-    !hasEnvModeOption &&
-    !hasRuntimeModeOption
-  ) {
+  if (!hasBranchOption && !hasWorktreePathOption && !hasEnvModeOption && !hasRuntimeModeOption) {
     return;
   }
 

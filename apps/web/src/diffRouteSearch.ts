@@ -18,7 +18,9 @@ function normalizeSearchString(value: unknown): string | undefined {
   return normalized.length > 0 ? normalized : undefined;
 }
 
-export function stripDiffSearchParams<T extends Record<string, unknown>>(search: T): Omit<T, "diff" | "diffTurnId" | "diffFilePath"> {
+export function stripDiffSearchParams<T extends Record<string, unknown>>(
+  search: T,
+): Omit<T, "diff" | "diffTurnId" | "diffFilePath"> {
   const { diff: _diff, diffTurnId: _diffTurnId, diffFilePath: _diffFilePath, ...rest } = search;
   return rest as Omit<T, "diff" | "diffTurnId" | "diffFilePath">;
 }

@@ -120,7 +120,7 @@ export function resolveWslHomeDirectorySync(distro?: string): string | null {
   try {
     const output = execFileSync(
       "wsl.exe",
-      ["-d", resolvedDistro, "--exec", "sh", "-lc", "printf %s \"$HOME\""],
+      ["-d", resolvedDistro, "--exec", "sh", "-lc", 'printf %s "$HOME"'],
       {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],

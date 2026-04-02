@@ -29,7 +29,9 @@ function NewThreadRouteView() {
       draftThreadId: search.draftThreadId,
     }),
   });
-  const getDraftThreadByProjectId = useComposerDraftStore((store) => store.getDraftThreadByProjectId);
+  const getDraftThreadByProjectId = useComposerDraftStore(
+    (store) => store.getDraftThreadByProjectId,
+  );
   const getDraftThread = useComposerDraftStore((store) => store.getDraftThread);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const setProjectDraftThreadId = useComposerDraftStore((store) => store.setProjectDraftThreadId);

@@ -13,7 +13,10 @@
     currentUrl.searchParams.get("t3DesktopWsUrl");
 
   function postMessage(payload) {
-    if (!window.__electrobunBunBridge || typeof window.__electrobunBunBridge.postMessage !== "function") {
+    if (
+      !window.__electrobunBunBridge ||
+      typeof window.__electrobunBunBridge.postMessage !== "function"
+    ) {
       throw new Error("Desktop bridge is unavailable.");
     }
     // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Electrobun host bridge is not window.postMessage.
@@ -48,7 +51,11 @@
         pendingRequest.resolve(message.result);
         return;
       }
-      pendingRequest.reject(new Error(typeof message.error === "string" ? message.error : "Desktop bridge request failed."));
+      pendingRequest.reject(
+        new Error(
+          typeof message.error === "string" ? message.error : "Desktop bridge request failed.",
+        ),
+      );
       return;
     }
 

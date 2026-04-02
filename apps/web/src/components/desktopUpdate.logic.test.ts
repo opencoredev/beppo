@@ -212,7 +212,7 @@ describe("desktop update UI helpers", () => {
         availableVersion: "1.1.0",
         downloadedVersion: "1.1.1",
       }),
-    ).toContain("Install update 1.1.1 and restart T3 Code?");
+    ).toContain("Install update 1.1.1 and restart Beppo?");
   });
 
   it("falls back to generic install confirmation copy when no version is available", () => {
@@ -221,7 +221,7 @@ describe("desktop update UI helpers", () => {
         availableVersion: null,
         downloadedVersion: null,
       }),
-    ).toContain("Install update and restart T3 Code?");
+    ).toContain("Install update and restart Beppo?");
   });
 });
 

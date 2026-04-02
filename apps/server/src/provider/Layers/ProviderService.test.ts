@@ -315,7 +315,7 @@ it.effect("ProviderServiceLive rejects new sessions for disabled providers", () 
     );
 
     assert.instanceOf(failure, ProviderValidationError);
-    assert.include(failure.issue, "Provider 'claudeAgent' is disabled in T3 Code settings.");
+    assert.include(failure.issue, "Provider 'claudeAgent' is disabled in Beppo settings.");
     assert.equal(claude.startSession.mock.calls.length, 0);
   }).pipe(Effect.provide(NodeServices.layer)),
 );

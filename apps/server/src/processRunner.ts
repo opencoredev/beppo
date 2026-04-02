@@ -119,10 +119,7 @@ function isWindowsExecutable(filePath: string, pathExtensions: ReadonlyArray<str
  * Returns the original command unchanged on non-Windows platforms or when
  * the command already contains a path separator.
  */
-function resolveCommandForPlatform(
-  command: string,
-  env: NodeJS.ProcessEnv = process.env,
-): string {
+function resolveCommandForPlatform(command: string, env: NodeJS.ProcessEnv = process.env): string {
   if (process.platform !== "win32") return command;
   if (command.includes("/") || command.includes("\\")) return command;
 

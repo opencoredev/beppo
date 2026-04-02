@@ -475,12 +475,16 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         cwd: resolvedCwd,
         env: childEnv,
       });
-      const child = spawn(wslCommand?.command ?? codexBinaryPath, wslCommand?.args ?? ["app-server"], {
-        cwd: wslCommand?.cwd ?? resolvedCwd,
-        env: wslCommand?.env ?? childEnv,
-        stdio: ["pipe", "pipe", "pipe"],
-        shell: wslCommand ? false : process.platform === "win32",
-      });
+      const child = spawn(
+        wslCommand?.command ?? codexBinaryPath,
+        wslCommand?.args ?? ["app-server"],
+        {
+          cwd: wslCommand?.cwd ?? resolvedCwd,
+          env: wslCommand?.env ?? childEnv,
+          stdio: ["pipe", "pipe", "pipe"],
+          shell: wslCommand ? false : process.platform === "win32",
+        },
+      );
       const output = readline.createInterface({ input: child.stdout });
 
       context = {

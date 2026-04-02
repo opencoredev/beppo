@@ -253,7 +253,10 @@ function SuspenseShikiCodeBlock({
   }, [cacheKey, code, highlightedHtml, isStreaming]);
 
   return (
-    <div className="chat-markdown-shiki" dangerouslySetInnerHTML={{ __html: sanitizeHtml(highlightedHtml) }} />
+    <div
+      className="chat-markdown-shiki"
+      dangerouslySetInnerHTML={{ __html: sanitizeHtml(highlightedHtml) }}
+    />
   );
 }
 

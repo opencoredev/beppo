@@ -821,23 +821,23 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       if (!terminated) {
         yield* Effect.sleep(processKillGraceMs);
 
-      yield* Effect.try({
-        try: () => process.kill("SIGKILL"),
-        catch: (cause) =>
-          new TerminalProcessSignalError({
-            message: "Failed to send SIGKILL to terminal process.",
-            cause,
-            signal: "SIGKILL",
-          }),
-      }).pipe(
-        Effect.catch((error) =>
-          Effect.logWarning("failed to force-kill terminal process", {
-            threadId,
-            terminalId,
-            signal: "SIGKILL",
-            error: error.message,
-          }),
-        ),
+        yield* Effect.try({
+          try: () => process.kill("SIGKILL"),
+          catch: (cause) =>
+            new TerminalProcessSignalError({
+              message: "Failed to send SIGKILL to terminal process.",
+              cause,
+              signal: "SIGKILL",
+            }),
+        }).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("failed to force-kill terminal process", {
+              threadId,
+              terminalId,
+              signal: "SIGKILL",
+              error: error.message,
+            }),
+          ),
         );
       }
     });

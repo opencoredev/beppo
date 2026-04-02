@@ -351,10 +351,11 @@ export const websocketRpcRouteLayer = Layer.unwrap(
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const config = yield* ServerConfig;
-        const origin = HttpServerRequest.toURL(request).pipe(
-          Option.map((u) => u.searchParams.get("origin") ?? undefined),
-          Option.getOrUndefined,
-        ) ?? request.headers["origin"];
+        const origin =
+          HttpServerRequest.toURL(request).pipe(
+            Option.map((u) => u.searchParams.get("origin") ?? undefined),
+            Option.getOrUndefined,
+          ) ?? request.headers["origin"];
         if (!isAllowedOrigin(origin, config.devUrl?.toString())) {
           return HttpServerResponse.text("Forbidden origin", { status: 403 });
         }

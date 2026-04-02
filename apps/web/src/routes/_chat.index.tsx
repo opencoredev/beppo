@@ -2,7 +2,13 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 
 import { APP_BASE_NAME } from "../branding";
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../components/ui/empty";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "../components/ui/empty";
 import { isElectron } from "../env";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { normalizeDraftThreadId } from "../lib/routeSearch";
@@ -44,13 +50,7 @@ function ChatIndexRouteView() {
         replace: true,
       });
     }
-  }, [
-    draftThreadExists,
-    draftThreadId,
-    navigate,
-    threadExists,
-    threadsHydrated,
-  ]);
+  }, [draftThreadExists, draftThreadId, navigate, threadExists, threadsHydrated]);
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">

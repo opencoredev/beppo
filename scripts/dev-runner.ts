@@ -95,14 +95,11 @@ function ensureLinuxDesktopDependencies(mode: DevMode): Effect.Effect<void, DevR
     try: async () => {
       const { stdout } = await execFileAsync("ldconfig", ["-p"]);
       const isWsl =
-        Boolean(process.env.WSL_DISTRO_NAME) ||
-        OS.release().toLowerCase().includes("microsoft");
+        Boolean(process.env.WSL_DISTRO_NAME) || OS.release().toLowerCase().includes("microsoft");
       const requiredDependencies = isWsl
         ? [...LINUX_DESKTOP_DEPENDENCIES, ...LINUX_WSL_CEF_DEPENDENCIES]
         : LINUX_DESKTOP_DEPENDENCIES;
-      const missing = requiredDependencies.filter(
-        ({ library }) => !stdout.includes(library),
-      );
+      const missing = requiredDependencies.filter(({ library }) => !stdout.includes(library));
       if (missing.length === 0) {
         return;
       }
@@ -632,7 +629,7 @@ const devRunnerCli = Command.make("dev-runner", {
     Argument.withDescription("Development mode to run."),
   ),
   t3Home: Flag.string("home-dir").pipe(
-    Flag.withDescription("Base directory for all T3 Code data (equivalent to T3CODE_HOME)."),
+    Flag.withDescription("Base directory for all Beppo data (equivalent to T3CODE_HOME)."),
     Flag.withFallbackConfig(optionalStringConfig("T3CODE_HOME")),
   ),
   authToken: Flag.string("auth-token").pipe(

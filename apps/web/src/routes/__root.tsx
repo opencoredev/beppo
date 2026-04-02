@@ -212,9 +212,7 @@ function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
               >
                 {detailsOpen ? "Hide details" : "Show details"}
               </button>
-              <span className="text-[11px] text-muted-foreground/80">
-                Copy includes full trace
-              </span>
+              <span className="text-[11px] text-muted-foreground/80">Copy includes full trace</span>
             </div>
             {detailsOpen ? (
               <pre className="max-h-52 overflow-auto border-t border-border/70 bg-background/80 px-3 py-2 text-xs text-foreground/85">

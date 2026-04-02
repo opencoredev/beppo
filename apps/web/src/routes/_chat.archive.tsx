@@ -81,19 +81,20 @@ function groupArchivedThreads(threads: Thread[], projects: Project[]): ArchivedT
     );
   }
 
-  return groups.toSorted(
-    (left, right) => {
-      const rightFirstThread = right.threads[0];
-      const leftFirstThread = left.threads[0];
-      if (!rightFirstThread || !leftFirstThread) {
-        return 0;
-      }
-      return archivedTimestamp(rightFirstThread) - archivedTimestamp(leftFirstThread);
-    },
-  );
+  return groups.toSorted((left, right) => {
+    const rightFirstThread = right.threads[0];
+    const leftFirstThread = left.threads[0];
+    if (!rightFirstThread || !leftFirstThread) {
+      return 0;
+    }
+    return archivedTimestamp(rightFirstThread) - archivedTimestamp(leftFirstThread);
+  });
 }
 
-function sameIdSet(left: ReadonlySet<ArchivedThreadId>, right: ReadonlySet<ArchivedThreadId>): boolean {
+function sameIdSet(
+  left: ReadonlySet<ArchivedThreadId>,
+  right: ReadonlySet<ArchivedThreadId>,
+): boolean {
   if (left.size !== right.size) {
     return false;
   }
@@ -233,80 +234,74 @@ function ArchiveRouteView() {
     };
   }, []);
 
-  const toggleThreadSelection = useCallback(
-    (threadId: ArchivedThreadId, checked: boolean) => {
-      setSelectedThreadIds((current) => {
-        const next = new Set(current);
-        if (checked) {
-          next.add(threadId);
-        } else {
-          next.delete(threadId);
-        }
-        return next;
-      });
-    },
-    [],
-  );
+  const toggleThreadSelection = useCallback((threadId: ArchivedThreadId, checked: boolean) => {
+    setSelectedThreadIds((current) => {
+      const next = new Set(current);
+      if (checked) {
+        next.add(threadId);
+      } else {
+        next.delete(threadId);
+      }
+      return next;
+    });
+  }, []);
 
   const clearSelection = useCallback(() => {
     setSelectedThreadIds(new Set());
   }, []);
 
-  const performRestore = useCallback(
-    async (threadIds: readonly ArchivedThreadId[]) => {
-      if (threadIds.length === 0) {
-        return;
+  const performRestore = useCallback(async (threadIds: readonly ArchivedThreadId[]) => {
+    if (threadIds.length === 0) {
+      return;
+    }
+
+    const api = readNativeApi();
+    if (!api) {
+      toastManager.add({
+        type: "error",
+        title: "Archive controls unavailable",
+      });
+      return;
+    }
+
+    setPendingAction({ kind: "restore", ids: threadIds });
+    try {
+      const restoredIds: ArchivedThreadId[] = [];
+      let failedCount = 0;
+
+      for (const threadId of threadIds) {
+        try {
+          await restoreThreadCommand(api, threadId);
+          restoredIds.push(threadId);
+        } catch {
+          failedCount += 1;
+        }
       }
 
-      const api = readNativeApi();
-      if (!api) {
+      if (restoredIds.length > 0) {
+        toastManager.add({
+          type: "success",
+          title:
+            restoredIds.length === 1
+              ? "Thread restored"
+              : `${restoredIds.length} archived chats restored`,
+        });
+        setSelectedThreadIds((current) => removeIds(current, restoredIds));
+      }
+
+      if (failedCount > 0) {
         toastManager.add({
           type: "error",
-          title: "Archive controls unavailable",
+          title:
+            failedCount === 1
+              ? "Failed to restore 1 archived chat"
+              : `Failed to restore ${failedCount} archived chats`,
         });
-        return;
       }
-
-      setPendingAction({ kind: "restore", ids: threadIds });
-      try {
-        const restoredIds: ArchivedThreadId[] = [];
-        let failedCount = 0;
-
-        for (const threadId of threadIds) {
-          try {
-            await restoreThreadCommand(api, threadId);
-            restoredIds.push(threadId);
-          } catch {
-            failedCount += 1;
-          }
-        }
-
-        if (restoredIds.length > 0) {
-          toastManager.add({
-            type: "success",
-            title:
-              restoredIds.length === 1
-                ? "Thread restored"
-                : `${restoredIds.length} archived chats restored`,
-          });
-          setSelectedThreadIds((current) => removeIds(current, restoredIds));
-        }
-
-        if (failedCount > 0) {
-          toastManager.add({
-            type: "error",
-            title:
-              failedCount === 1
-                ? "Failed to restore 1 archived chat"
-                : `Failed to restore ${failedCount} archived chats`,
-          });
-        }
-      } finally {
-        setPendingAction(null);
-      }
-    },
-    [],
-  );
+    } finally {
+      setPendingAction(null);
+    }
+  }, []);
 
   const openDeleteDialog = useCallback((threadIds: readonly ArchivedThreadId[]) => {
     if (threadIds.length === 0) {
@@ -394,7 +389,6 @@ function ArchiveRouteView() {
               : `Failed to delete ${failedCount} archived chats`,
         });
       }
-
     } finally {
       setDeleteDialogThreadIds(null);
       setPendingAction(null);
@@ -591,10 +585,7 @@ function ArchiveRouteView() {
                                     <h3 className="truncate text-sm font-medium text-foreground">
                                       {thread.title}
                                     </h3>
-                                    <Badge
-                                      variant={isSelected ? "secondary" : "outline"}
-                                      size="sm"
-                                    >
+                                    <Badge variant={isSelected ? "secondary" : "outline"} size="sm">
                                       <ArchiveIcon />
                                       {isSelected ? "Queued" : "Archived"}
                                     </Badge>
@@ -602,11 +593,11 @@ function ArchiveRouteView() {
                                   <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                                     <span>
                                       Archived{" "}
-                                      {formatCalendarDateTime(thread.archivedAt ?? thread.createdAt)}
+                                      {formatCalendarDateTime(
+                                        thread.archivedAt ?? thread.createdAt,
+                                      )}
                                     </span>
-                                    <span>
-                                      Deletes {formatCalendarDateTime(deleteAt)}
-                                    </span>
+                                    <span>Deletes {formatCalendarDateTime(deleteAt)}</span>
                                   </div>
                                 </div>
                               </div>

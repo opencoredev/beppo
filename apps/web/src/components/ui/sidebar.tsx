@@ -30,9 +30,7 @@ const SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH = 16 * 16;
 const SIDEBAR_MOTION_EASING = "var(--sidebar-motion-ease)";
 
 function getSidebarMotionDuration(isOpen: boolean): string {
-  return isOpen
-    ? "var(--sidebar-motion-open-duration)"
-    : "var(--sidebar-motion-close-duration)";
+  return isOpen ? "var(--sidebar-motion-open-duration)" : "var(--sidebar-motion-close-duration)";
 }
 
 type SidebarContextProps = {

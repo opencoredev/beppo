@@ -1,10 +1,4 @@
-import {
-  cpSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  realpathSync,
-} from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, realpathSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 const buildDir = process.env.ELECTROBUN_BUILD_DIR?.trim();
@@ -20,10 +14,7 @@ if (!buildDir) {
 const resolvedBuildDir = resolve(buildDir);
 const iconSource = resolve(import.meta.dir, "../resources/icon.icns");
 
-function collectReferencedBunStoreEntries(
-  sourceStoreDir: string,
-  storeEntries: Set<string>,
-): void {
+function collectReferencedBunStoreEntries(sourceStoreDir: string, storeEntries: Set<string>): void {
   const resolvedStoreDir = realpathSync(sourceStoreDir);
   if (storeEntries.has(resolvedStoreDir)) {
     return;
@@ -76,7 +67,10 @@ function vendorServerRuntime(appRootDir: string): void {
       continue;
     }
 
-    const destinationDependencyPath = join(destinationServerNodeModulesDir, ...dependency.split("/"));
+    const destinationDependencyPath = join(
+      destinationServerNodeModulesDir,
+      ...dependency.split("/"),
+    );
     mkdirSync(dirname(destinationDependencyPath), { recursive: true });
     cpSync(sourceDependencyPath, destinationDependencyPath, {
       recursive: true,

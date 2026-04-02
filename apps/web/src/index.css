@@ -44,7 +44,7 @@
       background-position: -200% 0;
     }
   }
-  --font-sans: 'Geist Variable', sans-serif;
+  --font-sans: "Geist Variable", sans-serif;
   --font-brand: "Space Grotesk", "Geist Variable", sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);

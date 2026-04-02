@@ -48,16 +48,12 @@ export const resolveBaseDir = Effect.fn(function* (raw: string | undefined) {
   if (!raw || raw.trim().length === 0) {
     const legacyStateDir = process.env.T3CODE_STATE_DIR?.trim();
     if (legacyStateDir && legacyStateDir.length > 0) {
-      yield* Effect.logWarning(
-        "T3CODE_STATE_DIR is deprecated. Use T3CODE_HOME instead.",
-      );
+      yield* Effect.logWarning("T3CODE_STATE_DIR is deprecated. Use T3CODE_HOME instead.");
       const resolved = resolve(yield* expandHomePath(legacyStateDir));
       // Strip a trailing /userdata (or \userdata) segment so the derived
       // stateDir (baseDir + "/userdata") resolves back to the same location.
       const suffix = "/userdata";
-      return resolved.endsWith(suffix)
-        ? resolved.slice(0, -suffix.length)
-        : dirname(resolved);
+      return resolved.endsWith(suffix) ? resolved.slice(0, -suffix.length) : dirname(resolved);
     }
     return join(OS.homedir(), APP_HIDDEN_DIR);
   }

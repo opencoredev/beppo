@@ -441,7 +441,12 @@ const TOAST_TEXT_MAX_LENGTH = 200;
 function normalizeErrorToastText(error: unknown, fallback: string): string {
   if (typeof error === "string") return error || fallback;
   if (error instanceof Error) return error.message || fallback;
-  if (error != null && typeof error === "object" && "message" in error && typeof (error as { message: unknown }).message === "string") {
+  if (
+    error != null &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof (error as { message: unknown }).message === "string"
+  ) {
     return (error as { message: string }).message || fallback;
   }
   return fallback;

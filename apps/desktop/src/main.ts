@@ -15,7 +15,11 @@ import Electrobun, {
   Utils,
 } from "./electrobun-runtime";
 import * as Effect from "effect/Effect";
-import type { ContextMenuItem, DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
+import type {
+  ContextMenuItem,
+  DesktopUpdateActionResult,
+  DesktopUpdateState,
+} from "@t3tools/contracts";
 import { NetService } from "@t3tools/shared/Net";
 import {
   APP_BUNDLE_IDENTIFIER,
@@ -92,7 +96,9 @@ const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 const REPO_ROOT_DIR = process.env.T3CODE_REPO_ROOT || ROOT_DIR;
 const externalDevBackendWsUrl = process.env.VITE_WS_URL?.trim() || "";
 const useExternalDevBackend = isDevelopment && externalDevBackendWsUrl.length > 0;
-const APP_DISPLAY_NAME = isDevelopment ? "Beppo (Dev)" : desktopPackageJson.productName ?? "Beppo";
+const APP_DISPLAY_NAME = isDevelopment
+  ? "Beppo (Dev)"
+  : (desktopPackageJson.productName ?? "Beppo");
 const LOG_DIR = Path.join(STATE_DIR, "logs");
 const LOG_FILE_MAX_BYTES = 10 * 1024 * 1024;
 const LOG_FILE_MAX_FILES = 10;
@@ -100,8 +106,7 @@ const APP_RUN_ID = Crypto.randomBytes(6).toString("hex");
 const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const isWslRuntime =
-  Boolean(process.env.WSL_DISTRO_NAME) ||
-  OS.release().toLowerCase().includes("microsoft");
+  Boolean(process.env.WSL_DISTRO_NAME) || OS.release().toLowerCase().includes("microsoft");
 const useCefRenderer = !isDevelopment;
 
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
@@ -333,9 +338,7 @@ async function waitForHttpUrl(url: string, timeoutMs: number): Promise<void> {
     await sleep(150);
   }
 
-  throw new Error(
-    `Timed out waiting for desktop dev URL ${url}: ${formatErrorMessage(lastError)}`,
-  );
+  throw new Error(`Timed out waiting for desktop dev URL ${url}: ${formatErrorMessage(lastError)}`);
 }
 
 async function waitForTcpEndpoint(url: string, timeoutMs: number): Promise<void> {
@@ -415,14 +418,23 @@ function activateMacAppBundle(): void {
 
 function createResponse(
   id: string,
-  input: { readonly ok: true; readonly result?: unknown } | { readonly ok: false; readonly error: string },
+  input:
+    | { readonly ok: true; readonly result?: unknown }
+    | { readonly ok: false; readonly error: string },
 ): DesktopBridgeResponseEnvelope {
   return input.ok
-    ? { kind: "response", id, ok: true, ...(input.result !== undefined ? { result: input.result } : {}) }
+    ? {
+        kind: "response",
+        id,
+        ok: true,
+        ...(input.result !== undefined ? { result: input.result } : {}),
+      }
     : { kind: "response", id, ok: false, error: input.error };
 }
 
-function sendBridgeMessage(message: DesktopBridgeResponseEnvelope | DesktopBridgeEventEnvelope): void {
+function sendBridgeMessage(
+  message: DesktopBridgeResponseEnvelope | DesktopBridgeEventEnvelope,
+): void {
   if (!mainWindow) return;
   mainWindow.webview.sendMessageToWebviewViaExecute(message);
 }
@@ -483,9 +495,14 @@ function syncUpdateStateFromUpdaterEntry(entry: UpdaterStatusEntry): void {
       return;
     }
     case "update-available": {
-      const availableVersion = Updater.updateInfo()?.version ?? updateState.availableVersion ?? "unknown";
+      const availableVersion =
+        Updater.updateInfo()?.version ?? updateState.availableVersion ?? "unknown";
       setUpdateState(
-        reduceDesktopUpdateStateOnUpdateAvailable(updateState, availableVersion, new Date().toISOString()),
+        reduceDesktopUpdateStateOnUpdateAvailable(
+          updateState,
+          availableVersion,
+          new Date().toISOString(),
+        ),
       );
       return;
     }
@@ -510,19 +527,24 @@ function syncUpdateStateFromUpdaterEntry(entry: UpdaterStatusEntry): void {
         setUpdateState(reduceDesktopUpdateStateOnDownloadStart(updateState));
       }
       if (typeof entry.details?.progress === "number") {
-        setUpdateState(reduceDesktopUpdateStateOnDownloadProgress(updateState, entry.details.progress));
+        setUpdateState(
+          reduceDesktopUpdateStateOnDownloadProgress(updateState, entry.details.progress),
+        );
       }
       return;
     }
     case "download-progress": {
       if (typeof entry.details?.progress === "number") {
-        setUpdateState(reduceDesktopUpdateStateOnDownloadProgress(updateState, entry.details.progress));
+        setUpdateState(
+          reduceDesktopUpdateStateOnDownloadProgress(updateState, entry.details.progress),
+        );
       }
       return;
     }
     case "download-complete":
     case "complete": {
-      const version = Updater.updateInfo()?.version ?? updateState.availableVersion ?? updateState.currentVersion;
+      const version =
+        Updater.updateInfo()?.version ?? updateState.availableVersion ?? updateState.currentVersion;
       setUpdateState(reduceDesktopUpdateStateOnDownloadComplete(updateState, version));
       return;
     }
@@ -577,11 +599,14 @@ async function downloadAvailableUpdate(): Promise<{ accepted: boolean; completed
 
   try {
     await Updater.downloadUpdate();
-    const version = Updater.updateInfo()?.version ?? updateState.availableVersion ?? updateState.currentVersion;
+    const version =
+      Updater.updateInfo()?.version ?? updateState.availableVersion ?? updateState.currentVersion;
     setUpdateState(reduceDesktopUpdateStateOnDownloadComplete(updateState, version));
     return { accepted: true, completed: true };
   } catch (error) {
-    setUpdateState(reduceDesktopUpdateStateOnDownloadFailure(updateState, formatErrorMessage(error)));
+    setUpdateState(
+      reduceDesktopUpdateStateOnDownloadFailure(updateState, formatErrorMessage(error)),
+    );
     return { accepted: true, completed: false };
   } finally {
     updateDownloadInFlight = false;
@@ -601,7 +626,9 @@ async function installDownloadedUpdate(): Promise<{ accepted: boolean; completed
     return { accepted: true, completed: true };
   } catch (error) {
     isQuitting = false;
-    setUpdateState(reduceDesktopUpdateStateOnInstallFailure(updateState, formatErrorMessage(error)));
+    setUpdateState(
+      reduceDesktopUpdateStateOnInstallFailure(updateState, formatErrorMessage(error)),
+    );
     return { accepted: true, completed: false };
   }
 }
@@ -692,7 +719,9 @@ function startBackend(): void {
     if (backendProcess === child) {
       backendProcess = null;
     }
-    closeBackendSession(`pid=${child.pid ?? "unknown"} code=${code ?? "null"} signal=${signal ?? "null"}`);
+    closeBackendSession(
+      `pid=${child.pid ?? "unknown"} code=${code ?? "null"} signal=${signal ?? "null"}`,
+    );
     if (isQuitting) return;
     scheduleBackendRestart(`code=${code ?? "null"} signal=${signal ?? "null"}`);
   });
@@ -776,7 +805,7 @@ async function handleBridgeRequest(envelope: DesktopBridgeRequestEnvelope): Prom
       const result: unknown = await Utils.openFileDialog({
         startingFolder:
           process.platform === "win32"
-            ? resolveWindowsWslHomePathSync() ?? OS.homedir()
+            ? (resolveWindowsWslHomePathSync() ?? OS.homedir())
             : OS.homedir(),
         canChooseFiles: false,
         canChooseDirectory: true,
@@ -955,7 +984,11 @@ function createWindow(): DesktopWindow {
 
   window.webview.rpcHandler = (message: unknown) => {
     const envelope = message as Partial<DesktopBridgeRequestEnvelope>;
-    if (envelope.kind !== "request" || typeof envelope.id !== "string" || typeof envelope.method !== "string") {
+    if (
+      envelope.kind !== "request" ||
+      typeof envelope.id !== "string" ||
+      typeof envelope.method !== "string"
+    ) {
       return;
     }
 
