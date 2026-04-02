@@ -21,8 +21,7 @@
     "@types/bun": "catalog:",
     "@types/node": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:",
-    "wait-on": "^8.0.2"
+    "vitest": "catalog:"
   },
   "productName": "Beppo"
 }

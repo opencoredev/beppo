@@ -32,6 +32,9 @@ This document covers how to run desktop releases from one tag, first without sig
 - Required release assets for updater:
   - platform installers and update archives emitted by Electrobun
   - channel update manifests and patch artifacts under the configured release bucket
+- macOS metadata note:
+  - `electron-updater` reads `latest-mac.yml` for both Intel and Apple Silicon.
+  - The workflow merges the per-arch mac manifests into one `latest-mac.yml` before publishing the GitHub Release.
 
 ## 0) npm OIDC trusted publishing setup (CLI)
 

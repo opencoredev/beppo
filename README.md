@@ -109,6 +109,12 @@ Long term fix:
 - Proper Mac distribution requires Apple code signing and notarization
 - Until those credentials are configured in GitHub Actions, macOS releases will continue to need the manual first-run workaround
 
+## Contributing
+
+Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening an issue or PR.
+
+Need support? Join the [Discord](https://discord.gg/jn4EGJjrvv).
+
 ## Notes
 
 - Expect rough edges while the session model and provider orchestration are still evolving

@@ -1,8 +1,4 @@
-import {
-  getSharedHighlighter,
-  type DiffsHighlighter,
-  type SupportedLanguages,
-} from "@pierre/diffs";
+import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pierre/diffs";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import React, {
   Children,
@@ -20,13 +16,35 @@ import React, {
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { openInPreferredEditor } from "../editorPreferences";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
 import { resolveMarkdownFileLinkTarget } from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
-import { preferredTerminalEditor } from "../terminal-links";
+
+/**
+ * Sanitize HTML to prevent XSS by stripping script elements and inline event
+ * handler attributes. Uses the browser-native DOMParser so no extra dependency
+ * is required.
+ */
+function sanitizeHtml(html: string): string {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  // Remove all <script> elements
+  const scripts = doc.querySelectorAll("script");
+  scripts.forEach((s) => s.remove());
+  // Strip event-handler attributes (onclick, onerror, onload, etc.)
+  const allElements = doc.querySelectorAll("*");
+  allElements.forEach((el) => {
+    for (const attr of Array.from(el.attributes)) {
+      if (attr.name.startsWith("on")) {
+        el.removeAttribute(attr.name);
+      }
+    }
+  });
+  return doc.body.innerHTML;
+}
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -66,7 +84,9 @@ const highlighterPromiseCache = new Map<string, Promise<DiffsHighlighter>>();
 
 function extractFenceLanguage(className: string | undefined): string {
   const match = className?.match(CODE_FENCE_LANGUAGE_REGEX);
-  return match?.[1] ?? "text";
+  const raw = match?.[1] ?? "text";
+  // Shiki doesn't bundle a gitignore grammar; ini is a close match (#685)
+  return raw === "gitignore" ? "ini" : raw;
 }
 
 function nodeToPlainText(node: ReactNode): string {
@@ -202,7 +222,7 @@ function SuspenseShikiCodeBlock({
     return (
       <div
         className="chat-markdown-shiki"
-        dangerouslySetInnerHTML={{ __html: cachedHighlightedHtml }}
+        dangerouslySetInnerHTML={{ __html: sanitizeHtml(cachedHighlightedHtml) }}
       />
     );
   }
@@ -211,7 +231,12 @@ function SuspenseShikiCodeBlock({
   const highlightedHtml = useMemo(() => {
     try {
       return highlighter.codeToHtml(code, { lang: language, theme: themeName });
-    } catch {
+    } catch (error) {
+      // Log highlighting failures for debugging while falling back to plain text
+      console.warn(
+        `Code highlighting failed for language "${language}", falling back to plain text.`,
+        error instanceof Error ? error.message : error,
+      );
       // If highlighting fails for this language, render as plain text
       return highlighter.codeToHtml(code, { lang: "text", theme: themeName });
     }
@@ -228,7 +253,7 @@ function SuspenseShikiCodeBlock({
   }, [cacheKey, code, highlightedHtml, isStreaming]);
 
   return (
-    <div className="chat-markdown-shiki" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
+    <div className="chat-markdown-shiki" dangerouslySetInnerHTML={{ __html: sanitizeHtml(highlightedHtml) }} />
   );
 }
 
@@ -240,7 +265,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
       a({ node: _node, href, ...props }) {
         const targetPath = resolveMarkdownFileLinkTarget(href, cwd);
         if (!targetPath) {
-          return <a {...props} href={href} target="_blank" rel="noreferrer" />;
+          return <a {...props} href={href} target="_blank" rel="noopener noreferrer" />;
         }
 
         return (
@@ -252,7 +277,7 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
               event.stopPropagation();
               const api = readNativeApi();
               if (api) {
-                void api.shell.openInEditor(targetPath, preferredTerminalEditor());
+                void openInPreferredEditor(api, targetPath);
               } else {
                 console.warn("Native API not found. Unable to open file in editor.");
               }

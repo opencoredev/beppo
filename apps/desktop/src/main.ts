@@ -40,6 +40,7 @@ import {
   reduceDesktopUpdateStateOnNoUpdate,
   reduceDesktopUpdateStateOnUpdateAvailable,
 } from "./updateMachine";
+import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
 
 fixPath();
 
@@ -54,8 +55,36 @@ const UPDATE_INSTALL_METHOD = "installUpdate";
 const MENU_ACTION_EVENT = "menu-action";
 const UPDATE_STATE_EVENT = "update-state";
 
-const STATE_DIR =
-  process.env.T3CODE_STATE_DIR?.trim() || Path.join(OS.homedir(), APP_HIDDEN_DIR, "userdata");
+// ---------------------------------------------------------------------------
+// T3CODE_STATE_DIR backward-compatibility
+// ---------------------------------------------------------------------------
+// The old env var `T3CODE_STATE_DIR` pointed directly at the state directory,
+// whereas `T3CODE_HOME` points at the parent base directory with `userdata/`
+// appended.  If the caller still uses the legacy var, derive BASE_DIR so that
+// `Path.join(BASE_DIR, "userdata")` resolves to the same location.
+// ---------------------------------------------------------------------------
+function resolveBaseDirectory(): string {
+  const home = process.env.T3CODE_HOME?.trim();
+  if (home) return home;
+
+  const legacyStateDir = process.env.T3CODE_STATE_DIR?.trim();
+  if (legacyStateDir) {
+    console.warn(
+      "[desktop] T3CODE_STATE_DIR is deprecated and will be removed in a future release. " +
+        "Use T3CODE_HOME instead (the parent of the userdata directory). " +
+        `Mapping T3CODE_STATE_DIR="${legacyStateDir}" → T3CODE_HOME="${Path.dirname(legacyStateDir)}"`,
+    );
+    // T3CODE_STATE_DIR pointed at the state dir itself (e.g. ~/.t3/userdata).
+    // BASE_DIR should be the parent so that Path.join(BASE_DIR, "userdata")
+    // matches the original path.
+    return Path.dirname(legacyStateDir);
+  }
+
+  return Path.join(OS.homedir(), APP_HIDDEN_DIR);
+}
+
+const BASE_DIR = resolveBaseDirectory();
+const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const ROOT_DIR = Path.resolve(import.meta.dir, "..");
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 const externalDevBackendWsUrl = process.env.VITE_WS_URL?.trim() || "";
@@ -137,6 +166,27 @@ function sanitizeLogValue(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Mask a secret value for safe logging.  Shows the first 4 characters
+ * followed by `***` so operators can correlate values without exposing
+ * the full secret.  Returns `"<empty>"` for blank strings.
+ */
+function maskSecret(value: string): string {
+  if (value.length === 0) return "<empty>";
+  return `${value.slice(0, 4)}***`;
+}
+
+function backendChildEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.T3CODE_PORT;
+  delete env.T3CODE_AUTH_TOKEN;
+  delete env.T3CODE_MODE;
+  delete env.T3CODE_NO_BROWSER;
+  delete env.T3CODE_HOST;
+  delete env.T3CODE_DESKTOP_WS_URL;
+  return env;
+}
+
 function writeDesktopLog(message: string): void {
   if (!desktopLogSink) return;
   desktopLogSink.write(`[${logTimestamp()}] [${logScope("desktop")}] ${message}\n`);
@@ -151,6 +201,34 @@ function writeBackendSessionBoundary(phase: "START" | "END", details: string): v
 
 function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Validate and sanitize an external URL for safe opening.
+ * Only https:// URLs are allowed in production; http:// is additionally
+ * permitted in development mode for local tooling.
+ */
+function getSafeExternalUrl(rawUrl: unknown): string | null {
+  if (typeof rawUrl !== "string" || rawUrl.length === 0) {
+    return null;
+  }
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+
+  if (parsedUrl.protocol === "https:") {
+    return parsedUrl.toString();
+  }
+
+  if (parsedUrl.protocol === "http:" && isDevelopment) {
+    return parsedUrl.toString();
+  }
+
+  return null;
 }
 
 function resolveAppBundlePath(): string | null {
@@ -542,7 +620,7 @@ function configureAutoUpdater(): void {
 
 function backendEnv(): NodeJS.ProcessEnv {
   return {
-    ...process.env,
+    ...backendChildEnv(),
     T3CODE_MODE: "desktop",
     T3CODE_NO_BROWSER: "1",
     T3CODE_PORT: String(backendPort),
@@ -749,12 +827,13 @@ async function handleBridgeRequest(envelope: DesktopBridgeRequestEnvelope): Prom
         return false;
       }
 
+      const externalUrl = getSafeExternalUrl(envelope.params);
+      if (!externalUrl) {
+        return false;
+      }
+
       try {
-        const parsedUrl = new URL(envelope.params);
-        if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
-          return false;
-        }
-        return Utils.openExternal(parsedUrl.toString());
+        return Utils.openExternal(externalUrl);
       } catch {
         return false;
       }
@@ -911,7 +990,9 @@ async function bootstrap(): Promise<void> {
     );
     backendAuthToken = Crypto.randomBytes(24).toString("hex");
     backendWsUrl = `ws://127.0.0.1:${backendPort}/?token=${encodeURIComponent(backendAuthToken)}`;
-    writeDesktopLog(`bootstrap resolved websocket url=${backendWsUrl}`);
+    writeDesktopLog(
+      `bootstrap resolved websocket url=${backendWsUrl} authToken=${maskSecret(backendAuthToken)}`,
+    );
     startBackend();
     await waitForHttpUrl(`http://127.0.0.1:${backendPort}/`, 15_000);
   }
@@ -951,11 +1032,19 @@ function registerLifecycleHandlers(): void {
   });
 }
 
+const desktopRuntimeInfo = resolveDesktopRuntimeInfo({
+  platform: process.platform,
+  processArch: process.arch,
+  // Electrobun/Bun runs natively on the host architecture; there is no
+  // Rosetta-style translation layer like Electron's runningUnderARM64Translation.
+  runningUnderArm64Translation: false,
+});
+
 initializeLogging();
 
 const autoUpdatesEnabled = await resolveAutoUpdateEnabled();
 updateState = {
-  ...createInitialDesktopUpdateState(desktopPackageJson.version),
+  ...createInitialDesktopUpdateState(desktopPackageJson.version, desktopRuntimeInfo),
   enabled: autoUpdatesEnabled,
   status: autoUpdatesEnabled ? "idle" : "disabled",
 };

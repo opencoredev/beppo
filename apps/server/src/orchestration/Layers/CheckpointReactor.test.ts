@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-import type { ProviderRuntimeEvent, ProviderSession } from "@t3tools/contracts";
+import type { ProviderKind, ProviderRuntimeEvent, ProviderSession } from "@t3tools/contracts";
 import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -19,9 +19,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CheckpointStoreLive } from "../../checkpointing/Layers/CheckpointStore.ts";
 import { CheckpointStore } from "../../checkpointing/Services/CheckpointStore.ts";
+import { GitCoreLive } from "../../git/Layers/GitCore.ts";
 import { CheckpointReactorLive } from "./CheckpointReactor.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
+import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
+import { RuntimeReceiptBusLive } from "./RuntimeReceiptBus.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
@@ -36,6 +39,8 @@ import {
 } from "../../provider/Services/ProviderService.ts";
 import { checkpointRefForThreadTurn } from "../../checkpointing/Utils.ts";
 import { ServerConfig } from "../../config.ts";
+import { WorkspaceEntriesLive } from "../../workspace/Layers/WorkspaceEntries.ts";
+import { WorkspacePathsLive } from "../../workspace/Layers/WorkspacePaths.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.makeUnsafe(value);
 const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
@@ -43,7 +48,7 @@ const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
 type LegacyProviderRuntimeEvent = {
   readonly type: string;
   readonly eventId: EventId;
-  readonly provider: "codex";
+  readonly provider: ProviderKind;
   readonly createdAt: string;
   readonly threadId: ThreadId;
   readonly turnId?: string | undefined;
@@ -69,7 +74,7 @@ function createProviderServiceHarness(
     Effect.die(new Error("Unsupported provider call in test")) as Effect.Effect<A, never>;
   const listSessions = () =>
     hasSession
-        ? Effect.succeed([
+      ? Effect.succeed([
           {
             provider: providerName,
             status: "ready",
@@ -112,7 +117,7 @@ async function waitForThread(
     checkpoints: ReadonlyArray<{ checkpointTurnCount: number }>;
     activities: ReadonlyArray<{ kind: string }>;
   }) => boolean,
-  timeoutMs = 2000,
+  timeoutMs = 15_000,
 ) {
   const deadline = Date.now() + timeoutMs;
   const poll = async (): Promise<{
@@ -137,7 +142,7 @@ async function waitForThread(
 async function waitForEvent(
   engine: OrchestrationEngineShape,
   predicate: (event: { type: string }) => boolean,
-  timeoutMs = 2000,
+  timeoutMs = 15_000,
 ) {
   const deadline = Date.now() + timeoutMs;
   const poll = async () => {
@@ -188,7 +193,7 @@ function gitShowFileAtRef(cwd: string, ref: string, filePath: string): string {
   return runGit(cwd, ["show", `${ref}:${filePath}`]);
 }
 
-async function waitForGitRefExists(cwd: string, ref: string, timeoutMs = 2000) {
+async function waitForGitRefExists(cwd: string, ref: string, timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs;
   const poll = async (): Promise<void> => {
     if (gitRefExists(cwd, ref)) {
@@ -234,6 +239,7 @@ describe("CheckpointReactor", () => {
     readonly projectWorkspaceRoot?: string;
     readonly threadWorktreePath?: string | null;
     readonly providerSessionCwd?: string;
+    readonly providerName?: ProviderKind;
   }) {
     const cwd = createGitRepository();
     tempDirs.push(cwd);
@@ -241,20 +247,29 @@ describe("CheckpointReactor", () => {
       cwd,
       options?.hasSession ?? true,
       options?.providerSessionCwd ?? cwd,
-      "codex",
+      options?.providerName ?? "codex",
     );
     const orchestrationLayer = OrchestrationEngineLive.pipe(
+      Layer.provide(OrchestrationProjectionSnapshotQueryLive),
       Layer.provide(OrchestrationProjectionPipelineLive),
       Layer.provide(OrchestrationEventStoreLive),
       Layer.provide(OrchestrationCommandReceiptRepositoryLive),
       Layer.provide(SqlitePersistenceMemory),
     );
 
+    const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
+      prefix: "t3-checkpoint-reactor-test-",
+    });
+
     const layer = CheckpointReactorLive.pipe(
       Layer.provideMerge(orchestrationLayer),
+      Layer.provideMerge(RuntimeReceiptBusLive),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
       Layer.provideMerge(CheckpointStoreLive),
-      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+      Layer.provideMerge(WorkspaceEntriesLive.pipe(Layer.provide(WorkspacePathsLive))),
+      Layer.provideMerge(WorkspacePathsLive),
+      Layer.provideMerge(GitCoreLive),
+      Layer.provideMerge(ServerConfigLayer),
       Layer.provideMerge(NodeServices.layer),
     );
 
@@ -263,8 +278,8 @@ describe("CheckpointReactor", () => {
     const reactor = await runtime.runPromise(Effect.service(CheckpointReactor));
     const checkpointStore = await runtime.runPromise(Effect.service(CheckpointStore));
     scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
-    await Effect.runPromise(Effect.sleep("10 millis"));
+    await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
+    const drain = () => Effect.runPromise(reactor.drain);
 
     const createdAt = new Date().toISOString();
     await Effect.runPromise(
@@ -274,7 +289,10 @@ describe("CheckpointReactor", () => {
         projectId: asProjectId("project-1"),
         title: "Test Project",
         workspaceRoot: options?.projectWorkspaceRoot ?? cwd,
-        defaultModel: "gpt-5-codex",
+        defaultModelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
         createdAt,
       }),
     );
@@ -285,7 +303,10 @@ describe("CheckpointReactor", () => {
         threadId: ThreadId.makeUnsafe("thread-1"),
         projectId: asProjectId("project-1"),
         title: "Thread",
-        model: "gpt-5-codex",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
         branch: null,
@@ -321,6 +342,7 @@ describe("CheckpointReactor", () => {
       engine,
       provider,
       cwd,
+      drain,
     };
   }
 
@@ -350,7 +372,7 @@ describe("CheckpointReactor", () => {
       type: "turn.started",
       eventId: EventId.makeUnsafe("evt-turn-started-1"),
       provider: "codex",
-      
+
       createdAt: new Date().toISOString(),
       threadId: ThreadId.makeUnsafe("thread-1"),
       turnId: asTurnId("turn-1"),
@@ -365,7 +387,7 @@ describe("CheckpointReactor", () => {
       type: "turn.completed",
       eventId: EventId.makeUnsafe("evt-turn-completed-1"),
       provider: "codex",
-      
+
       createdAt: new Date().toISOString(),
       threadId: ThreadId.makeUnsafe("thread-1"),
       turnId: asTurnId("turn-1"),
@@ -426,7 +448,7 @@ describe("CheckpointReactor", () => {
       type: "turn.started",
       eventId: EventId.makeUnsafe("evt-turn-started-main"),
       provider: "codex",
-      
+
       createdAt: new Date().toISOString(),
       threadId: ThreadId.makeUnsafe("thread-1"),
       turnId: asTurnId("turn-main"),
@@ -442,14 +464,14 @@ describe("CheckpointReactor", () => {
       type: "turn.completed",
       eventId: EventId.makeUnsafe("evt-turn-completed-aux"),
       provider: "codex",
-      
+
       createdAt: new Date().toISOString(),
       threadId: ThreadId.makeUnsafe("thread-1"),
       turnId: asTurnId("turn-aux"),
       payload: { state: "completed" },
     });
 
-    await Effect.runPromise(Effect.sleep("40 millis"));
+    await harness.drain();
     const midReadModel = await Effect.runPromise(harness.engine.getReadModel());
     const midThread = midReadModel.threads.find(
       (entry) => entry.id === ThreadId.makeUnsafe("thread-1"),
@@ -460,7 +482,7 @@ describe("CheckpointReactor", () => {
       type: "turn.completed",
       eventId: EventId.makeUnsafe("evt-turn-completed-main"),
       provider: "codex",
-      
+
       createdAt: new Date().toISOString(),
       threadId: ThreadId.makeUnsafe("thread-1"),
       turnId: asTurnId("turn-main"),
@@ -472,6 +494,67 @@ describe("CheckpointReactor", () => {
       (entry) => entry.latestTurn?.turnId === "turn-main" && entry.checkpoints.length === 1,
     );
     expect(thread.checkpoints[0]?.checkpointTurnCount).toBe(1);
+  });
+
+  it("captures pre-turn and completion checkpoints for claude runtime events", async () => {
+    const harness = await createHarness({
+      seedFilesystemCheckpoints: false,
+      providerName: "claudeAgent",
+    });
+    const createdAt = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-session-set-capture-claude"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "ready",
+          providerName: "claudeAgent",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      }),
+    );
+
+    harness.provider.emit({
+      type: "turn.started",
+      eventId: EventId.makeUnsafe("evt-turn-started-claude-1"),
+      provider: "claudeAgent",
+      createdAt: new Date().toISOString(),
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      turnId: asTurnId("turn-claude-1"),
+    });
+    await waitForGitRefExists(
+      harness.cwd,
+      checkpointRefForThreadTurn(ThreadId.makeUnsafe("thread-1"), 0),
+    );
+
+    fs.writeFileSync(path.join(harness.cwd, "README.md"), "v2\n", "utf8");
+    harness.provider.emit({
+      type: "turn.completed",
+      eventId: EventId.makeUnsafe("evt-turn-completed-claude-1"),
+      provider: "claudeAgent",
+      createdAt: new Date().toISOString(),
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      turnId: asTurnId("turn-claude-1"),
+      payload: { state: "completed" },
+    });
+
+    await waitForEvent(harness.engine, (event) => event.type === "thread.turn-diff-completed");
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) => entry.latestTurn?.turnId === "turn-claude-1" && entry.checkpoints.length === 1,
+    );
+
+    expect(thread.checkpoints[0]?.checkpointTurnCount).toBe(1);
+    expect(
+      gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.makeUnsafe("thread-1"), 1)),
+    ).toBe(true);
   });
 
   it("appends capture failure activity when turn diff summary cannot be derived", async () => {
@@ -500,7 +583,7 @@ describe("CheckpointReactor", () => {
       type: "turn.completed",
       eventId: EventId.makeUnsafe("evt-turn-completed-missing-baseline"),
       provider: "codex",
-      
+
       createdAt: new Date().toISOString(),
       threadId: ThreadId.makeUnsafe("thread-1"),
       turnId: asTurnId("turn-missing-baseline"),
@@ -589,7 +672,7 @@ describe("CheckpointReactor", () => {
       type: "turn.completed",
       eventId: EventId.makeUnsafe("evt-turn-completed-missing-provider-cwd"),
       provider: "codex",
-      
+
       createdAt: new Date().toISOString(),
       threadId: ThreadId.makeUnsafe("thread-1"),
       turnId: asTurnId("turn-missing-cwd"),
@@ -635,7 +718,7 @@ describe("CheckpointReactor", () => {
       type: "checkpoint.captured",
       eventId: EventId.makeUnsafe("evt-checkpoint-captured-3"),
       provider: "codex",
-      
+
       createdAt: new Date().toISOString(),
       threadId: ThreadId.makeUnsafe("thread-1"),
       turnId: asTurnId("turn-3"),
@@ -643,7 +726,7 @@ describe("CheckpointReactor", () => {
       status: "completed",
     });
 
-    await Effect.runPromise(Effect.sleep("40 millis"));
+    await harness.drain();
     const readModel = await Effect.runPromise(harness.engine.getReadModel());
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
     expect(thread?.checkpoints.some((checkpoint) => checkpoint.checkpointTurnCount === 3)).toBe(
@@ -685,7 +768,7 @@ describe("CheckpointReactor", () => {
       type: "turn.completed",
       eventId: EventId.makeUnsafe("evt-runtime-capture-failure"),
       provider: "codex",
-      
+
       createdAt: new Date().toISOString(),
       threadId: ThreadId.makeUnsafe("thread-1"),
       turnId: asTurnId("turn-runtime-failure"),
@@ -696,7 +779,7 @@ describe("CheckpointReactor", () => {
       type: "turn.started",
       eventId: EventId.makeUnsafe("evt-turn-started-after-runtime-failure"),
       provider: "codex",
-      
+
       createdAt: new Date().toISOString(),
       threadId: ThreadId.makeUnsafe("thread-1"),
       turnId: asTurnId("turn-after-runtime-failure"),
@@ -789,6 +872,75 @@ describe("CheckpointReactor", () => {
     ).toBe(false);
   });
 
+  it("executes provider revert and emits thread.reverted for claude sessions", async () => {
+    const harness = await createHarness({ providerName: "claudeAgent" });
+    const createdAt = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-session-set-claude"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "ready",
+          providerName: "claudeAgent",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.diff.complete",
+        commandId: CommandId.makeUnsafe("cmd-diff-claude-1"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        turnId: asTurnId("turn-claude-1"),
+        completedAt: createdAt,
+        checkpointRef: checkpointRefForThreadTurn(ThreadId.makeUnsafe("thread-1"), 1),
+        status: "ready",
+        files: [],
+        checkpointTurnCount: 1,
+        createdAt,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.diff.complete",
+        commandId: CommandId.makeUnsafe("cmd-diff-claude-2"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        turnId: asTurnId("turn-claude-2"),
+        completedAt: createdAt,
+        checkpointRef: checkpointRefForThreadTurn(ThreadId.makeUnsafe("thread-1"), 2),
+        status: "ready",
+        files: [],
+        checkpointTurnCount: 2,
+        createdAt,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.checkpoint.revert",
+        commandId: CommandId.makeUnsafe("cmd-revert-request-claude"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        turnCount: 1,
+        createdAt,
+      }),
+    );
+
+    await waitForEvent(harness.engine, (event) => event.type === "thread.reverted");
+    expect(harness.provider.rollbackConversation).toHaveBeenCalledTimes(1);
+    expect(harness.provider.rollbackConversation).toHaveBeenCalledWith({
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      numTurns: 1,
+    });
+  });
+
   it("processes consecutive revert requests with deterministic rollback sequencing", async () => {
     const harness = await createHarness();
     const createdAt = new Date().toISOString();
@@ -859,18 +1011,7 @@ describe("CheckpointReactor", () => {
       }),
     );
 
-    const deadline = Date.now() + 2000;
-    const waitForRollbackCalls = async (): Promise<void> => {
-      if (harness.provider.rollbackConversation.mock.calls.length >= 2) {
-        return;
-      }
-      if (Date.now() >= deadline) {
-        throw new Error("Timed out waiting for rollbackConversation calls.");
-      }
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      return waitForRollbackCalls();
-    };
-    await waitForRollbackCalls();
+    await harness.drain();
 
     expect(harness.provider.rollbackConversation).toHaveBeenCalledTimes(2);
     expect(harness.provider.rollbackConversation.mock.calls[0]?.[0]).toEqual({

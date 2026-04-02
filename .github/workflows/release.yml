@@ -27,14 +27,16 @@ jobs:
       ref: ${{ github.sha }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - id: release_meta
         name: Resolve release version
         shell: bash
+        env:
+          VERSION_INPUT: ${{ github.event.inputs.version }}
         run: |
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            raw="${{ github.event.inputs.version }}"
+            raw="${VERSION_INPUT}"
           else
             raw="${GITHUB_REF_NAME}"
           fi
@@ -61,7 +63,7 @@ jobs:
           bun-version-file: package.json
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version-file: package.json
 
@@ -107,7 +109,7 @@ jobs:
             electrobun_target: win-x64
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
           fetch-depth: 0
@@ -118,7 +120,7 @@ jobs:
           bun-version-file: package.json
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version-file: package.json
 
@@ -165,7 +167,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          developer_id="$(security find-identity -v -p codesigning | sed -n 's/.*"\\(Developer ID Application[^"]*\\)".*/\\1/p' | head -n 1)"
+          developer_id="$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application[^"]*\)".*/\1/p' | head -n 1)"
           if [[ -n "$developer_id" ]]; then
             echo "developer_id=$developer_id" >> "$GITHUB_OUTPUT"
             echo "codesign_enabled=true" >> "$GITHUB_OUTPUT"
@@ -188,6 +190,11 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Align package versions to release version
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        run: node scripts/update-release-package-versions.ts "${RELEASE_VERSION}"
 
       - name: Build bundled web/server assets
         if: ${{ matrix.platform != 'win' }}
@@ -219,6 +226,8 @@ jobs:
           ELECTROBUN_TARGETS: ${{ matrix.electrobun_target }}
           T3CODE_DESKTOP_VERSION: ${{ needs.preflight.outputs.version }}
           T3CODE_DESKTOP_UPDATE_BASE_URL: https://github.com/opencoredev/beppo/releases/latest/download
+          BUILD_PLATFORM: ${{ matrix.platform }}
+          BUILD_ARCH: ${{ matrix.arch }}
         run: |
           has_all() {
             for value in "$@"; do
@@ -229,7 +238,7 @@ jobs:
             return 0
           }
 
-          if [[ "${{ matrix.platform }}" == "mac" ]]; then
+          if [[ "${BUILD_PLATFORM}" == "mac" ]]; then
             if [[ "${{ steps.mac_signing.outputs.codesign_enabled }}" == "true" ]]; then
               echo "macOS codesigning enabled."
             else
@@ -241,7 +250,7 @@ jobs:
             else
               echo "macOS notarization disabled (Apple ID credentials unavailable)."
             fi
-          elif [[ "${{ matrix.platform }}" == "win" ]]; then
+          elif [[ "${BUILD_PLATFORM}" == "win" ]]; then
             if has_all \
               "$AZURE_TENANT_ID" \
               "$AZURE_CLIENT_ID" \
@@ -255,7 +264,7 @@ jobs:
               echo "Windows signing unavailable for this Electrobun release path."
             fi
           else
-            echo "Signing disabled for ${{ matrix.platform }}."
+            echo "Signing disabled for ${BUILD_PLATFORM}."
           fi
 
           bun run dist:desktop:artifact
@@ -299,6 +308,9 @@ jobs:
 
       - name: Collect release assets
         shell: bash
+        env:
+          BUILD_PLATFORM: ${{ matrix.platform }}
+          BUILD_ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
           mkdir -p release-publish
@@ -311,7 +323,7 @@ jobs:
           done
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ matrix.platform }}-${{ matrix.arch }}
           path: release-publish/*
@@ -326,7 +338,7 @@ jobs:
       NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
@@ -336,7 +348,7 @@ jobs:
           bun-version-file: package.json
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version-file: package.json
           registry-url: https://registry.npmjs.org
@@ -348,25 +360,49 @@ jobs:
         if: ${{ !env.NODE_AUTH_TOKEN }}
         run: echo "NPM_TOKEN is not configured. Skipping CLI publish."
 
+      - name: Align package versions to release version
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        run: node scripts/update-release-package-versions.ts "${RELEASE_VERSION}"
+
       - name: Build CLI package
         if: ${{ env.NODE_AUTH_TOKEN }}
         run: bun run build --filter=@t3tools/web --filter=t3
 
       - name: Publish CLI package
         if: ${{ env.NODE_AUTH_TOKEN }}
-        run: node apps/server/scripts/cli.ts publish --tag latest --app-version "${{ needs.preflight.outputs.version }}" --provenance --verbose
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        run: node apps/server/scripts/cli.ts publish --tag latest --app-version "${RELEASE_VERSION}" --provenance --verbose
 
   release:
     name: Publish GitHub Release
     needs: [preflight, build]
     runs-on: ubuntu-24.04
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
       - name: Download all desktop artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: desktop-*
           merge-multiple: true
           path: release-assets
+
+      - name: Merge macOS updater manifests
+        run: |
+          node scripts/merge-mac-update-manifests.ts \
+            release-assets/latest-mac.yml \
+            release-assets/latest-mac-x64.yml
+          rm -f release-assets/latest-mac-x64.yml
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -386,11 +422,31 @@ jobs:
     needs: [preflight, release]
     runs-on: ubuntu-24.04
     steps:
+      - id: app_token
+        name: Mint release app token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
+          token: ${{ steps.app_token.outputs.token }}
+          persist-credentials: true
+
+      - id: app_bot
+        name: Resolve GitHub App bot identity
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
+        run: |
+          user_id="$(gh api "/users/${APP_SLUG}[bot]" --jq .id)"
+          echo "name=${APP_SLUG}[bot]" >> "$GITHUB_OUTPUT"
+          echo "email=${user_id}+${APP_SLUG}[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -398,7 +454,7 @@ jobs:
           bun-version-file: package.json
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version-file: package.json
 
@@ -406,33 +462,7 @@ jobs:
         name: Update version strings
         env:
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          node --input-type=module -e '
-            import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
-
-            const files = [
-              "apps/server/package.json",
-              "apps/desktop/package.json",
-              "apps/web/package.json",
-              "packages/contracts/package.json",
-            ];
-
-            let changed = false;
-            for (const file of files) {
-              const packageJson = JSON.parse(readFileSync(file, "utf8"));
-              if (packageJson.version !== process.env.RELEASE_VERSION) {
-                packageJson.version = process.env.RELEASE_VERSION;
-                writeFileSync(file, `${JSON.stringify(packageJson, null, 2)}\n`);
-                changed = true;
-              }
-            }
-
-            if (!changed) {
-              console.log("All package.json versions already match release version.");
-            }
-
-            appendFileSync(process.env.GITHUB_OUTPUT, `changed=${changed}\n`);
-          '
+        run: node scripts/update-release-package-versions.ts "$RELEASE_VERSION" --github-output
 
       - name: Format package.json files
         if: steps.update_versions.outputs.changed == 'true'
@@ -440,21 +470,23 @@ jobs:
 
       - name: Refresh lockfile
         if: steps.update_versions.outputs.changed == 'true'
-        run: bun install
+        run: bun install --lockfile-only --ignore-scripts
 
       - name: Commit and push version bump
         if: steps.update_versions.outputs.changed == 'true'
         shell: bash
         env:
           RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
+          BOT_NAME: ${{ steps.app_bot.outputs.name }}
+          BOT_EMAIL: ${{ steps.app_bot.outputs.email }}
         run: |
           if git diff --quiet -- apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json bun.lock; then
             echo "No version changes to commit."
             exit 0
           fi
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "${BOT_NAME}"
+          git config user.email "${BOT_EMAIL}"
 
           git add apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json bun.lock
           git commit -m "chore(release): prepare $RELEASE_TAG"

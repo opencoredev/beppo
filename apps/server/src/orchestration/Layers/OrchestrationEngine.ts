@@ -19,6 +19,7 @@ import {
 import { decideOrchestrationCommand } from "../decider.ts";
 import { createEmptyReadModel, projectEvent } from "../projector.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
+import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
@@ -49,18 +50,12 @@ function commandToAggregateRef(command: OrchestrationCommand): {
   }
 }
 
-function formatDispatchError(error: OrchestrationDispatchError): string {
-  if (error instanceof Error && error.message.length > 0) {
-    return error.message;
-  }
-  return String(error);
-}
-
 const makeOrchestrationEngine = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const eventStore = yield* OrchestrationEventStore;
   const commandReceiptRepository = yield* OrchestrationCommandReceiptRepository;
   const projectionPipeline = yield* OrchestrationProjectionPipeline;
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
 
   let readModel = createEmptyReadModel(new Date().toISOString());
 
@@ -191,7 +186,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                 acceptedAt: new Date().toISOString(),
                 resultSequence: readModel.snapshotSequence,
                 status: "rejected",
-                error: formatDispatchError(error),
+                error: error.message,
               })
               .pipe(Effect.catch(() => Effect.void));
           }
@@ -202,17 +197,11 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   };
 
   yield* projectionPipeline.bootstrap;
-
-  // bootstrap in-memory read model from event store
-  yield* Stream.runForEach(eventStore.readAll(), (event) =>
-    Effect.gen(function* () {
-      readModel = yield* projectEvent(readModel, event);
-    }),
-  );
+  readModel = yield* projectionSnapshotQuery.getSnapshot();
 
   const worker = Effect.forever(Queue.take(commandQueue).pipe(Effect.flatMap(processEnvelope)));
   yield* Effect.forkScoped(worker);
-  yield* Effect.log("orchestration engine started").pipe(
+  yield* Effect.logDebug("orchestration engine started").pipe(
     Effect.annotateLogs({ sequence: readModel.snapshotSequence }),
   );
 
@@ -229,14 +218,16 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       return yield* Deferred.await(result);
     });
 
-  const streamDomainEvents: OrchestrationEngineShape["streamDomainEvents"] =
-    Stream.fromPubSub(eventPubSub);
-
   return {
     getReadModel,
     readEvents,
     dispatch,
-    streamDomainEvents,
+    // Each access creates a fresh PubSub subscription so that multiple
+    // consumers (wsServer, ProviderRuntimeIngestion, CheckpointReactor, etc.)
+    // each independently receive all domain events.
+    get streamDomainEvents(): OrchestrationEngineShape["streamDomainEvents"] {
+      return Stream.fromPubSub(eventPubSub);
+    },
   } satisfies OrchestrationEngineShape;
 });
 

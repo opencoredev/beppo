@@ -1,7 +1,7 @@
 "use client";
 
 import { Toast } from "@base-ui/react/toast";
-import { useEffect, useState } from "react";
+import { useEffect, type CSSProperties } from "react";
 import { useParams } from "@tanstack/react-router";
 import { ThreadId } from "@t3tools/contracts";
 import {
@@ -16,7 +16,8 @@ import {
 
 import { cn } from "~/lib/utils";
 import { buttonVariants } from "~/components/ui/button";
-import { shouldHideCollapsedToastContent } from "./toast.logic";
+import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { buildVisibleToastLayout, shouldHideCollapsedToastContent } from "./toast.logic";
 
 type ThreadToastData = {
   threadId?: ThreadId | null;
@@ -38,6 +39,25 @@ const TOAST_ICONS = {
   success: CircleCheckIcon,
   warning: TriangleAlertIcon,
 } as const;
+
+function CopyErrorButton({ text }: { text: string }) {
+  const { copyToClipboard, isCopied } = useCopyToClipboard();
+
+  return (
+    <button
+      className="shrink-0 cursor-pointer rounded-md p-1 text-muted-foreground opacity-60 transition-opacity hover:opacity-100"
+      onClick={() => copyToClipboard(text)}
+      title="Copy error"
+      type="button"
+    >
+      {isCopied ? (
+        <CheckIcon className="size-3.5 text-success" />
+      ) : (
+        <CopyIcon className="size-3.5" />
+      )}
+    </button>
+  );
+}
 
 type ToastPosition =
   | "top-left"
@@ -146,64 +166,6 @@ function ThreadToastVisibleAutoDismiss({
   return null;
 }
 
-function shortenToastText(value: string, maxLength = 140): string {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-  return `${normalized.slice(0, maxLength - 3).trimEnd()}...`;
-}
-
-function normalizeErrorToastText(error: unknown, fallbackDescription: string): string {
-  if (typeof error === "string" && error.trim().length > 0) {
-    return error;
-  }
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
-  return fallbackDescription;
-}
-
-function ToastCopyAction({
-  copyText,
-  copyLabel,
-}: {
-  copyText: string;
-  copyLabel?: string;
-}) {
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    if (!copied) {
-      return;
-    }
-    const timeoutId = window.setTimeout(() => {
-      setCopied(false);
-    }, 1200);
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [copied]);
-
-  return (
-    <button
-      type="button"
-      className={cn(buttonVariants({ size: "xs", variant: "outline" }), "shrink-0")}
-      onClick={() => {
-        void navigator.clipboard
-          .writeText(copyText)
-          .then(() => setCopied(true))
-          .catch(() => undefined);
-      }}
-      title={copied ? "Copied" : (copyLabel ?? "Copy details")}
-      aria-label={copied ? "Copied" : (copyLabel ?? "Copy details")}
-    >
-      {copied ? <CheckIcon data-icon="inline-start" /> : <CopyIcon data-icon="inline-start" />}
-      {copied ? "Copied" : (copyLabel ?? "Copy")}
-    </button>
-  );
-}
-
 function ToastProvider({ children, position = "top-right", ...props }: ToastProviderProps) {
   return (
     <Toast.Provider toastManager={toastManager} {...props}>
@@ -220,6 +182,7 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
   const visibleToasts = toasts.filter((toast) =>
     shouldRenderForActiveThread(toast.data, activeThreadId),
   );
+  const visibleToastLayout = buildVisibleToastLayout(visibleToasts);
 
   useEffect(() => {
     const activeToastIds = new Set(toasts.map((toast) => toast.id));
@@ -245,12 +208,17 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
         )}
         data-position={position}
         data-slot="toast-viewport"
+        style={
+          {
+            "--toast-frontmost-height": `${visibleToastLayout.frontmostHeight}px`,
+          } as CSSProperties
+        }
       >
-        {visibleToasts.map((toast, visibleIndex) => {
+        {visibleToastLayout.items.map(({ toast, visibleIndex, offsetY }) => {
           const Icon = toast.type ? TOAST_ICONS[toast.type as keyof typeof TOAST_ICONS] : null;
           const hideCollapsedContent = shouldHideCollapsedToastContent(
             visibleIndex,
-            visibleToasts.length,
+            visibleToastLayout.items.length,
           );
 
           return (
@@ -303,6 +271,12 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
               )}
               data-position={position}
               key={toast.id}
+              style={
+                {
+                  "--toast-index": visibleIndex,
+                  "--toast-offset-y": `${offsetY}px`,
+                } as CSSProperties
+              }
               swipeDirection={
                 position.includes("center")
                   ? [isTop ? "up" : "down"]
@@ -334,33 +308,28 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
                   )}
 
                   <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <Toast.Title
-                      className="min-w-0 break-words font-medium"
-                      data-slot="toast-title"
-                    />
+                    <div className="flex items-center justify-between gap-1">
+                      <Toast.Title
+                        className="min-w-0 break-words font-medium"
+                        data-slot="toast-title"
+                      />
+                      {toast.type === "error" && typeof toast.description === "string" && (
+                        <CopyErrorButton text={toast.description} />
+                      )}
+                    </div>
                     <Toast.Description
-                      className="min-w-0 break-words text-muted-foreground"
+                      className="min-w-0 select-text break-words text-muted-foreground"
                       data-slot="toast-description"
                     />
                   </div>
                 </div>
-                {(toast.data?.copyText || toast.actionProps) && (
-                  <div className="flex shrink-0 items-center gap-1">
-                    {toast.data?.copyText ? (
-                      <ToastCopyAction
-                        copyText={toast.data.copyText}
-                        {...(toast.data.copyLabel ? { copyLabel: toast.data.copyLabel } : {})}
-                      />
-                    ) : null}
-                    {toast.actionProps ? (
-                      <Toast.Action
-                        className={cn(buttonVariants({ size: "xs" }), "shrink-0")}
-                        data-slot="toast-action"
-                      >
-                        {toast.actionProps.children}
-                      </Toast.Action>
-                    ) : null}
-                  </div>
+                {toast.actionProps && (
+                  <Toast.Action
+                    className={cn(buttonVariants({ size: "xs" }), "shrink-0")}
+                    data-slot="toast-action"
+                  >
+                    {toast.actionProps.children}
+                  </Toast.Action>
                 )}
               </Toast.Content>
             </Toast.Root>
@@ -433,35 +402,28 @@ function AnchoredToasts() {
                         )}
 
                         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                          <Toast.Title
-                            className="min-w-0 break-words font-medium"
-                            data-slot="toast-title"
-                          />
+                          <div className="flex items-center gap-1">
+                            <Toast.Title
+                              className="min-w-0 break-words font-medium"
+                              data-slot="toast-title"
+                            />
+                            {toast.type === "error" && typeof toast.description === "string" && (
+                              <CopyErrorButton text={toast.description} />
+                            )}
+                          </div>
                           <Toast.Description
-                            className="min-w-0 break-words text-muted-foreground"
+                            className="min-w-0 select-text break-words text-muted-foreground"
                             data-slot="toast-description"
                           />
                         </div>
                       </div>
-                      {(toast.data?.copyText || toast.actionProps) && (
-                        <div className="flex shrink-0 items-center gap-1">
-                          {toast.data?.copyText ? (
-                            <ToastCopyAction
-                              copyText={toast.data.copyText}
-                              {...(toast.data.copyLabel
-                                ? { copyLabel: toast.data.copyLabel }
-                                : {})}
-                            />
-                          ) : null}
-                          {toast.actionProps ? (
-                            <Toast.Action
-                              className={cn(buttonVariants({ size: "xs" }), "shrink-0")}
-                              data-slot="toast-action"
-                            >
-                              {toast.actionProps.children}
-                            </Toast.Action>
-                          ) : null}
-                        </div>
+                      {toast.actionProps && (
+                        <Toast.Action
+                          className={cn(buttonVariants({ size: "xs" }), "shrink-0")}
+                          data-slot="toast-action"
+                        >
+                          {toast.actionProps.children}
+                        </Toast.Action>
                       )}
                     </Toast.Content>
                   )}
@@ -474,12 +436,28 @@ function AnchoredToasts() {
   );
 }
 
+const TOAST_TEXT_MAX_LENGTH = 200;
+
+function normalizeErrorToastText(error: unknown, fallback: string): string {
+  if (typeof error === "string") return error || fallback;
+  if (error instanceof Error) return error.message || fallback;
+  if (error != null && typeof error === "object" && "message" in error && typeof (error as { message: unknown }).message === "string") {
+    return (error as { message: string }).message || fallback;
+  }
+  return fallback;
+}
+
+function shortenToastText(text: string, maxLength: number = TOAST_TEXT_MAX_LENGTH): string {
+  if (text.length <= maxLength) return text;
+  return text.slice(0, maxLength - 1) + "\u2026";
+}
+
 export {
   ToastProvider,
   type ToastPosition,
   toastManager,
   AnchoredToastProvider,
   anchoredToastManager,
-  shortenToastText,
   normalizeErrorToastText,
+  shortenToastText,
 };

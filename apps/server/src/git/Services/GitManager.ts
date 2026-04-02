@@ -7,6 +7,11 @@
  * @module GitManager
  */
 import {
+  GitActionProgressEvent,
+  GitPreparePullRequestThreadInput,
+  GitPreparePullRequestThreadResult,
+  GitPullRequestRefInput,
+  GitResolvePullRequestResult,
   GitRunStackedActionInput,
   GitRunStackedActionResult,
   GitStatusInput,
@@ -14,7 +19,16 @@ import {
 } from "@t3tools/contracts";
 import { ServiceMap } from "effect";
 import type { Effect } from "effect";
-import type { GitManagerServiceError } from "../Errors.ts";
+import type { GitManagerServiceError } from "@t3tools/contracts";
+
+export interface GitActionProgressReporter {
+  readonly publish: (event: GitActionProgressEvent) => Effect.Effect<void, never>;
+}
+
+export interface GitRunStackedActionOptions {
+  readonly actionId?: string;
+  readonly progressReporter?: GitActionProgressReporter;
+}
 
 /**
  * GitManagerShape - Service API for high-level Git workflow actions.
@@ -28,11 +42,26 @@ export interface GitManagerShape {
   ) => Effect.Effect<GitStatusResult, GitManagerServiceError>;
 
   /**
-   * Run a stacked Git action (`commit`, `commit_push`, `commit_push_pr`).
+   * Resolve a pull request by URL/number against the current repository.
+   */
+  readonly resolvePullRequest: (
+    input: GitPullRequestRefInput,
+  ) => Effect.Effect<GitResolvePullRequestResult, GitManagerServiceError>;
+
+  /**
+   * Prepare a new thread workspace from a pull request in local or worktree mode.
+   */
+  readonly preparePullRequestThread: (
+    input: GitPreparePullRequestThreadInput,
+  ) => Effect.Effect<GitPreparePullRequestThreadResult, GitManagerServiceError>;
+
+  /**
+   * Run a Git action (`commit`, `push`, `create_pr`, `commit_push`, `commit_push_pr`).
    * When `featureBranch` is set, creates and checks out a feature branch first.
    */
   readonly runStackedAction: (
     input: GitRunStackedActionInput,
+    options?: GitRunStackedActionOptions,
   ) => Effect.Effect<GitRunStackedActionResult, GitManagerServiceError>;
 }
 

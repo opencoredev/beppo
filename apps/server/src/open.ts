@@ -10,18 +10,15 @@ import { spawn } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
 import { extname, join } from "node:path";
 
-import { EDITORS, type EditorId } from "@t3tools/contracts";
-import { ServiceMap, Schema, Effect, Layer } from "effect";
+import { EDITORS, OpenError, type EditorId } from "@t3tools/contracts";
+import { ServiceMap, Effect, Layer } from "effect";
 import { toWindowsEditorPath } from "./wsl";
 
 // ==============================
 // Definitions
 // ==============================
 
-export class OpenError extends Schema.TaggedErrorClass<OpenError>()("OpenError", {
-  message: Schema.String,
-  cause: Schema.optional(Schema.Defect),
-}) {}
+export { OpenError };
 
 export interface OpenInEditorInput {
   readonly cwd: string;
@@ -40,8 +37,8 @@ interface CommandAvailabilityOptions {
 
 const LINE_COLUMN_SUFFIX_PATTERN = /:\d+(?::\d+)?$/;
 
-function shouldUseGotoFlag(editorId: EditorId, target: string): boolean {
-  return (editorId === "cursor" || editorId === "vscode") && LINE_COLUMN_SUFFIX_PATTERN.test(target);
+function shouldUseGotoFlag(editor: (typeof EDITORS)[number], target: string): boolean {
+  return editor.supportsGoto && LINE_COLUMN_SUFFIX_PATTERN.test(target);
 }
 
 function fileManagerCommandForPlatform(platform: NodeJS.Platform): string {
@@ -128,23 +125,30 @@ function resolvePathDelimiter(platform: NodeJS.Platform): string {
   return platform === "win32" ? ";" : ":";
 }
 
-export function isCommandAvailable(
+/**
+ * Resolve the full filesystem path for a command by searching PATH (and
+ * PATHEXT on Windows).  Returns `undefined` when the command cannot be found.
+ */
+export function resolveCommandPath(
   command: string,
   options: CommandAvailabilityOptions = {},
-): boolean {
+): string | undefined {
   const platform = options.platform ?? process.platform;
   const env = options.env ?? process.env;
   const windowsPathExtensions = platform === "win32" ? resolveWindowsPathExtensions(env) : [];
   const commandCandidates = resolveCommandCandidates(command, platform, windowsPathExtensions);
 
   if (command.includes("/") || command.includes("\\")) {
-    return commandCandidates.some((candidate) =>
-      isExecutableFile(candidate, platform, windowsPathExtensions),
-    );
+    for (const candidate of commandCandidates) {
+      if (isExecutableFile(candidate, platform, windowsPathExtensions)) {
+        return candidate;
+      }
+    }
+    return undefined;
   }
 
   const pathValue = resolvePathEnvironmentVariable(env);
-  if (pathValue.length === 0) return false;
+  if (pathValue.length === 0) return undefined;
   const pathEntries = pathValue
     .split(resolvePathDelimiter(platform))
     .map((entry) => stripWrappingQuotes(entry.trim()))
@@ -152,12 +156,20 @@ export function isCommandAvailable(
 
   for (const pathEntry of pathEntries) {
     for (const candidate of commandCandidates) {
-      if (isExecutableFile(join(pathEntry, candidate), platform, windowsPathExtensions)) {
-        return true;
+      const fullPath = join(pathEntry, candidate);
+      if (isExecutableFile(fullPath, platform, windowsPathExtensions)) {
+        return fullPath;
       }
     }
   }
-  return false;
+  return undefined;
+}
+
+export function isCommandAvailable(
+  command: string,
+  options: CommandAvailabilityOptions = {},
+): boolean {
+  return resolveCommandPath(command, options) !== undefined;
 }
 
 export function resolveAvailableEditors(
@@ -213,7 +225,7 @@ export const resolveEditorLaunch = Effect.fnUntraced(function* (
   }
 
   if (editorDef.command) {
-    return shouldUseGotoFlag(editorDef.id, resolvedTarget)
+    return shouldUseGotoFlag(editorDef, resolvedTarget)
       ? { command: editorDef.command, args: ["--goto", resolvedTarget] }
       : { command: editorDef.command, args: [resolvedTarget] };
   }
@@ -227,23 +239,21 @@ export const resolveEditorLaunch = Effect.fnUntraced(function* (
 
 export const launchDetached = (launch: EditorLaunch) =>
   Effect.gen(function* () {
-    if (!isCommandAvailable(launch.command)) {
+    const resolvedPath = resolveCommandPath(launch.command);
+    if (!resolvedPath) {
       return yield* new OpenError({ message: `Editor command not found: ${launch.command}` });
     }
 
     yield* Effect.callback<void, OpenError>((resume) => {
       let child;
       try {
-        child = spawn(launch.command, [...launch.args], {
+        child = spawn(resolvedPath, [...launch.args], {
           detached: true,
           stdio: "ignore",
-          shell: process.platform === "win32",
         });
       } catch (error) {
         return resume(
-          Effect.fail(
-            new OpenError({ message: "failed to spawn detached process", cause: error }),
-          ),
+          Effect.fail(new OpenError({ message: "failed to spawn detached process", cause: error })),
         );
       }
 

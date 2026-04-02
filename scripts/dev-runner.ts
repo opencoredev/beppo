@@ -50,8 +50,8 @@ const LINUX_WSL_CEF_DEPENDENCIES = [
 ] as const;
 const execFileAsync = promisify(execFile);
 
-export const DEFAULT_DEV_STATE_DIR = Effect.map(Effect.service(Path.Path), (path) =>
-  path.join(homedir(), APP_HIDDEN_DIR, "dev"),
+export const DEFAULT_T3_HOME = Effect.map(Effect.service(Path.Path), (path) =>
+  path.join(homedir(), APP_HIDDEN_DIR),
 );
 
 const MODE_ARGS = {
@@ -232,17 +232,16 @@ export function resolveOffset(config: {
   return { offset, source: `hashed T3CODE_DEV_INSTANCE=${seed}` };
 }
 
-function resolveStateDir(stateDir: string | undefined): Effect.Effect<string, never, Path.Path> {
+function resolveBaseDir(baseDir: string | undefined): Effect.Effect<string, never, Path.Path> {
   return Effect.gen(function* () {
     const path = yield* Path.Path;
-    const configured = stateDir?.trim();
+    const configured = baseDir?.trim();
 
     if (configured) {
-      // Resolve relative paths against cwd (monorepo root) before turbo changes directories.
       return path.resolve(configured);
     }
 
-    return yield* DEFAULT_DEV_STATE_DIR;
+    return yield* DEFAULT_T3_HOME;
   });
 }
 
@@ -251,7 +250,7 @@ interface CreateDevRunnerEnvInput {
   readonly baseEnv: NodeJS.ProcessEnv;
   readonly serverOffset: number;
   readonly webOffset: number;
-  readonly stateDir: string | undefined;
+  readonly t3Home: string | undefined;
   readonly authToken: string | undefined;
   readonly noBrowser: boolean | undefined;
   readonly autoBootstrapProjectFromCwd: boolean | undefined;
@@ -266,7 +265,7 @@ export function createDevRunnerEnv({
   baseEnv,
   serverOffset,
   webOffset,
-  stateDir,
+  t3Home,
   authToken,
   noBrowser,
   autoBootstrapProjectFromCwd,
@@ -278,31 +277,42 @@ export function createDevRunnerEnv({
   return Effect.gen(function* () {
     const serverPort = port ?? BASE_SERVER_PORT + serverOffset;
     const webPort = BASE_WEB_PORT + webOffset;
-    const resolvedStateDir = yield* resolveStateDir(stateDir);
+    const resolvedBaseDir = yield* resolveBaseDir(t3Home);
+    const isDesktopMode = mode === "dev:desktop";
 
     const output: NodeJS.ProcessEnv = {
       ...baseEnv,
-      T3CODE_PORT: String(serverPort),
       PORT: String(webPort),
       ELECTRON_RENDERER_PORT: String(webPort),
-      VITE_WS_URL: `ws://localhost:${serverPort}`,
       VITE_DEV_SERVER_URL: devUrl?.toString() ?? `http://localhost:${webPort}`,
-      T3CODE_STATE_DIR: resolvedStateDir,
+      T3CODE_HOME: resolvedBaseDir,
     };
 
-    if (host !== undefined) {
+    if (!isDesktopMode) {
+      output.T3CODE_PORT = String(serverPort);
+      output.VITE_WS_URL = `ws://localhost:${serverPort}`;
+    } else {
+      delete output.T3CODE_PORT;
+      delete output.VITE_WS_URL;
+      delete output.T3CODE_AUTH_TOKEN;
+      delete output.T3CODE_MODE;
+      delete output.T3CODE_NO_BROWSER;
+      delete output.T3CODE_HOST;
+    }
+
+    if (!isDesktopMode && host !== undefined) {
       output.T3CODE_HOST = host;
     }
 
-    if (authToken !== undefined) {
+    if (!isDesktopMode && authToken !== undefined) {
       output.T3CODE_AUTH_TOKEN = authToken;
-    } else {
+    } else if (!isDesktopMode) {
       delete output.T3CODE_AUTH_TOKEN;
     }
 
-    if (noBrowser !== undefined) {
+    if (!isDesktopMode && noBrowser !== undefined) {
       output.T3CODE_NO_BROWSER = noBrowser ? "1" : "0";
-    } else {
+    } else if (!isDesktopMode) {
       delete output.T3CODE_NO_BROWSER;
     }
 
@@ -328,7 +338,7 @@ export function createDevRunnerEnv({
       delete output.T3CODE_DESKTOP_WS_URL;
     }
 
-    if (mode === "dev:desktop") {
+    if (isDesktopMode) {
       output.T3CODE_NO_BROWSER = "1";
       delete output.T3CODE_DESKTOP_WS_URL;
     }
@@ -471,7 +481,7 @@ export function resolveModePortOffsets<R = NetService>({
 
 interface DevRunnerCliInput {
   readonly mode: DevMode;
-  readonly stateDir: string | undefined;
+  readonly t3Home: string | undefined;
   readonly authToken: string | undefined;
   readonly noBrowser: boolean | undefined;
   readonly autoBootstrapProjectFromCwd: boolean | undefined;
@@ -538,9 +548,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
 
     const envOverrides = {
       noBrowser: readOptionalBooleanEnv("T3CODE_NO_BROWSER"),
-      autoBootstrapProjectFromCwd: readOptionalBooleanEnv(
-        "T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD",
-      ),
+      autoBootstrapProjectFromCwd: readOptionalBooleanEnv("T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD"),
       logWebSocketEvents: readOptionalBooleanEnv("T3CODE_LOG_WS_EVENTS"),
     };
 
@@ -556,7 +564,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       baseEnv: process.env,
       serverOffset,
       webOffset,
-      stateDir: input.stateDir,
+      t3Home: input.t3Home,
       authToken: input.authToken,
       noBrowser: resolveOptionalBooleanOverride(input.noBrowser, envOverrides.noBrowser),
       autoBootstrapProjectFromCwd: resolveOptionalBooleanOverride(
@@ -598,7 +606,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
         : "";
 
     yield* Effect.logInfo(
-      `[dev-runner] mode=${input.mode} source=${source}${selectionSuffix} serverPort=${String(env.T3CODE_PORT)} webPort=${String(env.PORT)} stateDir=${String(env.T3CODE_STATE_DIR)}`,
+      `[dev-runner] mode=${input.mode} source=${source}${selectionSuffix} serverPort=${String(env.T3CODE_PORT)} webPort=${String(env.PORT)} baseDir=${String(env.T3CODE_HOME)}`,
     );
 
     if (input.dryRun) {
@@ -622,9 +630,9 @@ const devRunnerCli = Command.make("dev-runner", {
   mode: Argument.choice("mode", DEV_RUNNER_MODES).pipe(
     Argument.withDescription("Development mode to run."),
   ),
-  stateDir: Flag.string("state-dir").pipe(
-    Flag.withDescription("State directory path (forwards to T3CODE_STATE_DIR)."),
-    Flag.withFallbackConfig(optionalStringConfig("T3CODE_STATE_DIR")),
+  t3Home: Flag.string("home-dir").pipe(
+    Flag.withDescription("Base directory for all T3 Code data (equivalent to T3CODE_HOME)."),
+    Flag.withFallbackConfig(optionalStringConfig("T3CODE_HOME")),
   ),
   authToken: Flag.string("auth-token").pipe(
     Flag.withDescription("Auth token (forwards to T3CODE_AUTH_TOKEN)."),

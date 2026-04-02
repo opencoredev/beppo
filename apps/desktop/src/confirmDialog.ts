@@ -11,7 +11,7 @@ export async function showDesktopConfirmDialog(message: string): Promise<boolean
   const result = await Utils.showMessageBox({
     type: "question" as const,
     buttons: ["No", "Yes"],
-    defaultId: CONFIRM_BUTTON_INDEX,
+    defaultId: 0,
     cancelId: 0,
     message: normalizedMessage,
   });

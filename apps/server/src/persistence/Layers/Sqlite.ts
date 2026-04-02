@@ -16,42 +16,39 @@ const defaultSqliteClientLoaders = {
   node: () => import("../NodeSqliteClient.ts"),
 } satisfies Record<string, () => Promise<Loader>>;
 
-const makeRuntimeSqliteLayer = (
+const makeRuntimeSqliteLayer = Effect.fn("makeRuntimeSqliteLayer")(function* (
   config: RuntimeSqliteLayerConfig,
-): Layer.Layer<SqlClient.SqlClient> =>
-  Effect.gen(function* () {
-    const runtime = process.versions.bun !== undefined ? "bun" : "node";
-    const loader = defaultSqliteClientLoaders[runtime];
-    const clientModule = yield* Effect.promise<Loader>(loader);
-    return clientModule.layer(config);
-  }).pipe(Layer.unwrap);
+) {
+  const runtime = process.versions.bun !== undefined ? "bun" : "node";
+  const loader = defaultSqliteClientLoaders[runtime];
+  const clientModule = yield* Effect.promise<Loader>(loader);
+  return clientModule.layer(config);
+}, Layer.unwrap);
 
 const setup = Layer.effectDiscard(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* sql`PRAGMA journal_mode = WAL;`;
     yield* sql`PRAGMA foreign_keys = ON;`;
-    yield* runMigrations;
+    yield* runMigrations();
   }),
 );
 
-export const makeSqlitePersistenceLive = (dbPath: string) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    yield* fs.makeDirectory(path.dirname(dbPath), { recursive: true });
+export const makeSqlitePersistenceLive = Effect.fn("makeSqlitePersistenceLive")(function* (
+  dbPath: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  yield* fs.makeDirectory(path.dirname(dbPath), { recursive: true });
 
-    return Layer.provideMerge(setup, makeRuntimeSqliteLayer({ filename: dbPath }));
-  }).pipe(Layer.unwrap);
+  return Layer.provideMerge(setup, makeRuntimeSqliteLayer({ filename: dbPath }));
+}, Layer.unwrap);
 
 export const SqlitePersistenceMemory = Layer.provideMerge(
   setup,
   makeRuntimeSqliteLayer({ filename: ":memory:" }),
 );
 
-export const layerConfig = Effect.gen(function* () {
-  const { stateDir } = yield* ServerConfig;
-  const { join } = yield* Path.Path;
-  const dbPath = join(stateDir, "state.sqlite");
-  return makeSqlitePersistenceLive(dbPath);
-}).pipe(Layer.unwrap);
+export const layerConfig = Layer.unwrap(
+  Effect.map(Effect.service(ServerConfig), ({ dbPath }) => makeSqlitePersistenceLive(dbPath)),
+);

@@ -14,7 +14,6 @@ import {
   type ProviderApprovalDecision,
   type ProviderEvent,
   type ProviderSession,
-  type ProviderSessionStartInput,
   type ProviderTurnStartResult,
   RuntimeMode,
   ProviderInteractionMode,
@@ -28,6 +27,15 @@ import {
   isCodexCliVersionSupported,
   parseCodexCliVersion,
 } from "./provider/codexCliVersion";
+import {
+  readCodexAccountSnapshot,
+  resolveCodexModelForAccount,
+  type CodexAccountSnapshot,
+} from "./provider/codexAccount";
+import { buildCodexInitializeParams, killCodexChildProcess } from "./provider/codexAppServer";
+
+export { buildCodexInitializeParams } from "./provider/codexAppServer";
+export { readCodexAccountSnapshot, resolveCodexModelForAccount } from "./provider/codexAccount";
 
 type PendingRequestKey = string;
 
@@ -71,6 +79,7 @@ interface CodexSessionContext {
   pending: Map<PendingRequestKey, PendingRequest>;
   pendingApprovals: Map<ApprovalRequestId, PendingApprovalRequest>;
   pendingUserInputs: Map<ApprovalRequestId, PendingUserInputRequest>;
+  collabReceiverTurns: Map<string, TurnId>;
   nextRequestId: number;
   stopping: boolean;
 }
@@ -97,23 +106,6 @@ interface JsonRpcNotification {
   params?: unknown;
 }
 
-type CodexPlanType =
-  | "free"
-  | "go"
-  | "plus"
-  | "pro"
-  | "team"
-  | "business"
-  | "enterprise"
-  | "edu"
-  | "unknown";
-
-interface CodexAccountSnapshot {
-  readonly type: "apiKey" | "chatgpt" | "unknown";
-  readonly planType: CodexPlanType | null;
-  readonly sparkEnabled: boolean;
-}
-
 export interface CodexAppServerSendTurnInput {
   readonly threadId: ThreadId;
   readonly input?: string;
@@ -131,7 +123,8 @@ export interface CodexAppServerStartSessionInput {
   readonly model?: string;
   readonly serviceTier?: string;
   readonly resumeCursor?: unknown;
-  readonly providerOptions?: ProviderSessionStartInput["providerOptions"];
+  readonly binaryPath: string;
+  readonly homePath?: string;
   readonly runtimeMode: RuntimeMode;
 }
 
@@ -162,50 +155,6 @@ const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
   "unknown thread",
   "does not exist",
 ];
-const CODEX_DEFAULT_MODEL = "gpt-5.3-codex";
-const CODEX_SPARK_MODEL = "gpt-5.3-codex-spark";
-const CODEX_SPARK_DISABLED_PLAN_TYPES = new Set<CodexPlanType>(["free", "go", "plus"]);
-
-function asObject(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  return value as Record<string, unknown>;
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-export function readCodexAccountSnapshot(response: unknown): CodexAccountSnapshot {
-  const record = asObject(response);
-  const account = asObject(record?.account) ?? record;
-  const accountType = asString(account?.type);
-
-  if (accountType === "apiKey") {
-    return {
-      type: "apiKey",
-      planType: null,
-      sparkEnabled: true,
-    };
-  }
-
-  if (accountType === "chatgpt") {
-    const planType = (account?.planType as CodexPlanType | null) ?? "unknown";
-    return {
-      type: "chatgpt",
-      planType,
-      sparkEnabled: !CODEX_SPARK_DISABLED_PLAN_TYPES.has(planType),
-    };
-  }
-
-  return {
-    type: "unknown",
-    planType: null,
-    sparkEnabled: true,
-  };
-}
-
 export const CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Plan Mode (Conversational)
 
 You work in 3 phases, and you should *chat your way* to a great plan before finalizing it. A great plan is very detailed-intent- and implementation-wise-so that it can be handed to another engineer or agent to be implemented right away. It must be **decision complete**, where the implementer does not need to make any decisions.
@@ -358,32 +307,13 @@ function mapCodexRuntimeMode(runtimeMode: RuntimeMode): {
   };
 }
 
-export function resolveCodexModelForAccount(
-  model: string | undefined,
-  account: CodexAccountSnapshot,
-): string | undefined {
-  if (model !== CODEX_SPARK_MODEL || account.sparkEnabled) {
-    return model;
-  }
-
-  return CODEX_DEFAULT_MODEL;
-}
-
 /**
  * On Windows with `shell: true`, `child.kill()` only terminates the `cmd.exe`
  * wrapper, leaving the actual command running. Use `taskkill /T` to kill the
  * entire process tree instead.
  */
 function killChildTree(child: ChildProcessWithoutNullStreams): void {
-  if (process.platform === "win32" && child.pid !== undefined) {
-    try {
-      spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
-      return;
-    } catch {
-      // fallback to direct kill
-    }
-  }
-  child.kill();
+  killCodexChildProcess(child);
 }
 
 export function normalizeCodexModelSlug(
@@ -400,19 +330,6 @@ export function normalizeCodexModelSlug(
   }
 
   return normalized;
-}
-
-export function buildCodexInitializeParams() {
-  return {
-    clientInfo: {
-      name: "beppo_desktop",
-      title: "Beppo Desktop",
-      version: "0.1.0",
-    },
-    capabilities: {
-      experimentalApi: true,
-    },
-  } as const;
 }
 
 function buildCodexCollaborationMode(input: {
@@ -541,9 +458,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         updatedAt: now,
       };
 
-      const codexOptions = readCodexProviderOptions(input);
-      const codexBinaryPath = codexOptions.binaryPath ?? "codex";
-      const codexHomePath = codexOptions.homePath;
+      const codexBinaryPath = input.binaryPath;
+      const codexHomePath = input.homePath;
       const childEnv = {
         ...process.env,
         ...(codexHomePath ? { CODEX_HOME: codexHomePath } : {}),
@@ -579,6 +495,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         pending: new Map(),
         pendingApprovals: new Map(),
         pendingUserInputs: new Map(),
+        collabReceiverTurns: new Map(),
         nextRequestId: 1,
         stopping: false,
       };
@@ -740,6 +657,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
   async sendTurn(input: CodexAppServerSendTurnInput): Promise<ProviderTurnStartResult> {
     const context = this.requireSession(input.threadId);
+    context.collabReceiverTurns.clear();
 
     const turnInput: Array<
       { type: "text"; text: string; text_elements: [] } | { type: "image"; url: string }
@@ -1052,7 +970,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           continue;
         }
 
-        this.emitErrorEvent(context, "process/stderr", classified.message);
+        this.emitNotificationEvent(context, "process/stderr", classified.message);
       }
     });
 
@@ -1129,7 +1047,16 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     context: CodexSessionContext,
     notification: JsonRpcNotification,
   ): void {
-    const route = this.readRouteFields(notification.params);
+    const rawRoute = this.readRouteFields(notification.params);
+    this.rememberCollabReceiverTurns(context, notification.params, rawRoute.turnId);
+    const childParentTurnId = this.readChildParentTurnId(context, notification.params);
+    const isChildConversation = childParentTurnId !== undefined;
+    if (
+      isChildConversation &&
+      this.shouldSuppressChildConversationNotification(notification.method)
+    ) {
+      return;
+    }
     const textDelta =
       notification.method === "item/agentMessage/delta"
         ? this.readString(notification.params, "delta")
@@ -1142,8 +1069,10 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       threadId: context.session.threadId,
       createdAt: new Date().toISOString(),
       method: notification.method,
-      turnId: route.turnId,
-      itemId: route.itemId,
+      ...((childParentTurnId ?? rawRoute.turnId)
+        ? { turnId: childParentTurnId ?? rawRoute.turnId }
+        : {}),
+      ...(rawRoute.itemId ? { itemId: rawRoute.itemId } : {}),
       textDelta,
       payload: notification.params,
     });
@@ -1159,6 +1088,9 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     }
 
     if (notification.method === "turn/started") {
+      if (isChildConversation) {
+        return;
+      }
       const turnId = toTurnId(this.readString(this.readObject(notification.params)?.turn, "id"));
       this.updateSession(context, {
         status: "running",
@@ -1168,6 +1100,10 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     }
 
     if (notification.method === "turn/completed") {
+      if (isChildConversation) {
+        return;
+      }
+      context.collabReceiverTurns.clear();
       const turn = this.readObject(notification.params, "turn");
       const status = this.readString(turn, "status");
       const errorMessage = this.readString(this.readObject(turn, "error"), "message");
@@ -1180,6 +1116,9 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     }
 
     if (notification.method === "error") {
+      if (isChildConversation) {
+        return;
+      }
       const message = this.readString(this.readObject(notification.params)?.error, "message");
       const willRetry = this.readBoolean(notification.params, "willRetry");
 
@@ -1191,7 +1130,9 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   }
 
   private handleServerRequest(context: CodexSessionContext, request: JsonRpcRequest): void {
-    const route = this.readRouteFields(request.params);
+    const rawRoute = this.readRouteFields(request.params);
+    const childParentTurnId = this.readChildParentTurnId(context, request.params);
+    const effectiveTurnId = childParentTurnId ?? rawRoute.turnId;
     const requestKind = this.requestKindForMethod(request.method);
     let requestId: ApprovalRequestId | undefined;
     if (requestKind) {
@@ -1207,8 +1148,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
               : "item/fileChange/requestApproval",
         requestKind,
         threadId: context.session.threadId,
-        ...(route.turnId ? { turnId: route.turnId } : {}),
-        ...(route.itemId ? { itemId: route.itemId } : {}),
+        ...(effectiveTurnId ? { turnId: effectiveTurnId } : {}),
+        ...(rawRoute.itemId ? { itemId: rawRoute.itemId } : {}),
       };
       context.pendingApprovals.set(requestId, pendingRequest);
     }
@@ -1219,8 +1160,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         requestId,
         jsonRpcId: request.id,
         threadId: context.session.threadId,
-        ...(route.turnId ? { turnId: route.turnId } : {}),
-        ...(route.itemId ? { itemId: route.itemId } : {}),
+        ...(effectiveTurnId ? { turnId: effectiveTurnId } : {}),
+        ...(rawRoute.itemId ? { itemId: rawRoute.itemId } : {}),
       });
     }
 
@@ -1231,8 +1172,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       threadId: context.session.threadId,
       createdAt: new Date().toISOString(),
       method: request.method,
-      turnId: route.turnId,
-      itemId: route.itemId,
+      ...(effectiveTurnId ? { turnId: effectiveTurnId } : {}),
+      ...(rawRoute.itemId ? { itemId: rawRoute.itemId } : {}),
       requestId,
       requestKind,
       payload: request.params,
@@ -1329,6 +1270,22 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     this.emitEvent({
       id: EventId.makeUnsafe(randomUUID()),
       kind: "error",
+      provider: "codex",
+      threadId: context.session.threadId,
+      createdAt: new Date().toISOString(),
+      method,
+      message,
+    });
+  }
+
+  private emitNotificationEvent(
+    context: CodexSessionContext,
+    method: string,
+    message: string,
+  ): void {
+    this.emitEvent({
+      id: EventId.makeUnsafe(randomUUID()),
+      kind: "notification",
       provider: "codex",
       threadId: context.session.threadId,
       createdAt: new Date().toISOString(),
@@ -1459,6 +1416,64 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     return route;
   }
 
+  private readProviderConversationId(params: unknown): string | undefined {
+    return (
+      this.readString(params, "threadId") ??
+      this.readString(this.readObject(params, "thread"), "id") ??
+      this.readString(params, "conversationId")
+    );
+  }
+
+  private readChildParentTurnId(context: CodexSessionContext, params: unknown): TurnId | undefined {
+    const providerConversationId = this.readProviderConversationId(params);
+    if (!providerConversationId) {
+      return undefined;
+    }
+    return context.collabReceiverTurns.get(providerConversationId);
+  }
+
+  private rememberCollabReceiverTurns(
+    context: CodexSessionContext,
+    params: unknown,
+    parentTurnId: TurnId | undefined,
+  ): void {
+    if (!parentTurnId) {
+      return;
+    }
+    const payload = this.readObject(params);
+    const item = this.readObject(payload, "item") ?? payload;
+    const itemType = this.readString(item, "type") ?? this.readString(item, "kind");
+    if (itemType !== "collabAgentToolCall") {
+      return;
+    }
+
+    const receiverThreadIds =
+      this.readArray(item, "receiverThreadIds")
+        ?.map((value) => (typeof value === "string" ? value : null))
+        .filter((value): value is string => value !== null) ?? [];
+    for (const receiverThreadId of receiverThreadIds) {
+      context.collabReceiverTurns.set(receiverThreadId, parentTurnId);
+    }
+  }
+
+  private shouldSuppressChildConversationNotification(method: string): boolean {
+    return (
+      method === "thread/started" ||
+      method === "thread/status/changed" ||
+      method === "thread/archived" ||
+      method === "thread/unarchived" ||
+      method === "thread/closed" ||
+      method === "thread/compacted" ||
+      method === "thread/name/updated" ||
+      method === "thread/tokenUsage/updated" ||
+      method === "turn/started" ||
+      method === "turn/completed" ||
+      method === "turn/aborted" ||
+      method === "turn/plan/updated" ||
+      method === "item/plan/delta"
+    );
+  }
+
   private readObject(value: unknown, key?: string): Record<string, unknown> | undefined {
     const target =
       key === undefined
@@ -1515,20 +1530,6 @@ function normalizeProviderThreadId(value: string | undefined): string | undefine
   return brandIfNonEmpty(value, (normalized) => normalized);
 }
 
-function readCodexProviderOptions(input: CodexAppServerStartSessionInput): {
-  readonly binaryPath?: string;
-  readonly homePath?: string;
-} {
-  const options = input.providerOptions?.codex;
-  if (!options) {
-    return {};
-  }
-  return {
-    ...(options.binaryPath ? { binaryPath: options.binaryPath } : {}),
-    ...(options.homePath ? { homePath: options.homePath } : {}),
-  };
-}
-
 function assertSupportedCodexCliVersion(input: {
   readonly binaryPath: string;
   readonly cwd: string;
@@ -1582,7 +1583,11 @@ function readResumeCursorThreadId(resumeCursor: unknown): string | undefined {
   return typeof rawThreadId === "string" ? normalizeProviderThreadId(rawThreadId) : undefined;
 }
 
-function readResumeThreadId(input: CodexAppServerStartSessionInput): string | undefined {
+function readResumeThreadId(input: {
+  readonly resumeCursor?: unknown;
+  readonly threadId?: ThreadId;
+  readonly runtimeMode?: RuntimeMode;
+}): string | undefined {
   return readResumeCursorThreadId(input.resumeCursor);
 }
 

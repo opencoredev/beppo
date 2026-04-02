@@ -1,9 +1,9 @@
 import { TurnId } from "@t3tools/contracts";
 
 export interface DiffRouteSearch {
-  diff?: "1";
-  diffTurnId?: TurnId;
-  diffFilePath?: string;
+  diff?: "1" | undefined;
+  diffTurnId?: TurnId | undefined;
+  diffFilePath?: string | undefined;
 }
 
 function isDiffOpenValue(value: unknown): boolean {
@@ -16,6 +16,11 @@ function normalizeSearchString(value: unknown): string | undefined {
   }
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : undefined;
+}
+
+export function stripDiffSearchParams<T extends Record<string, unknown>>(search: T): Omit<T, "diff" | "diffTurnId" | "diffFilePath"> {
+  const { diff: _diff, diffTurnId: _diffTurnId, diffFilePath: _diffFilePath, ...rest } = search;
+  return rest as Omit<T, "diff" | "diffTurnId" | "diffFilePath">;
 }
 
 export function parseDiffRouteSearch(search: Record<string, unknown>): DiffRouteSearch {

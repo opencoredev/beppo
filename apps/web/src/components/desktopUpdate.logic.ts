@@ -5,16 +5,13 @@ export type DesktopUpdateButtonAction = "download" | "install" | "none";
 export function resolveDesktopUpdateButtonAction(
   state: DesktopUpdateState,
 ): DesktopUpdateButtonAction {
+  if (state.downloadedVersion) {
+    return "install";
+  }
   if (state.status === "available") {
     return "download";
   }
-  if (state.status === "downloaded") {
-    return "install";
-  }
   if (state.status === "error") {
-    if (state.errorContext === "install" && state.downloadedVersion) {
-      return "install";
-    }
     if (state.errorContext === "download" && state.availableVersion) {
       return "download";
     }
@@ -32,8 +29,27 @@ export function shouldShowDesktopUpdateButton(state: DesktopUpdateState | null):
   return resolveDesktopUpdateButtonAction(state) !== "none";
 }
 
+export function shouldShowArm64IntelBuildWarning(state: DesktopUpdateState | null): boolean {
+  return state?.hostArch === "arm64" && state.appArch === "x64";
+}
+
 export function isDesktopUpdateButtonDisabled(state: DesktopUpdateState | null): boolean {
   return state?.status === "downloading";
+}
+
+export function getArm64IntelBuildWarningDescription(state: DesktopUpdateState): string {
+  if (!shouldShowArm64IntelBuildWarning(state)) {
+    return "This install is using the correct architecture.";
+  }
+
+  const action = resolveDesktopUpdateButtonAction(state);
+  if (action === "download") {
+    return "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. Download the available update to switch to the native Apple Silicon build.";
+  }
+  if (action === "install") {
+    return "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. Restart to install the downloaded Apple Silicon build.";
+  }
+  return "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. The next app update will replace it with the native Apple Silicon build.";
 }
 
 export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string {
@@ -57,7 +73,14 @@ export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string
     }
     return state.message ?? "Update failed";
   }
-  return "Update available";
+  return "Up to date";
+}
+
+export function getDesktopUpdateInstallConfirmationMessage(
+  state: Pick<DesktopUpdateState, "availableVersion" | "downloadedVersion">,
+): string {
+  const version = state.downloadedVersion ?? state.availableVersion;
+  return `Install update${version ? ` ${version}` : ""} and restart T3 Code?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.`;
 }
 
 export function getDesktopUpdateActionError(result: DesktopUpdateActionResult): string | null {
@@ -68,10 +91,20 @@ export function getDesktopUpdateActionError(result: DesktopUpdateActionResult): 
 }
 
 export function shouldToastDesktopUpdateActionResult(result: DesktopUpdateActionResult): boolean {
-  return result.accepted && !result.completed;
+  return getDesktopUpdateActionError(result) !== null;
 }
 
 export function shouldHighlightDesktopUpdateError(state: DesktopUpdateState | null): boolean {
   if (!state || state.status !== "error") return false;
   return state.errorContext === "download" || state.errorContext === "install";
+}
+
+export function canCheckForUpdate(state: DesktopUpdateState | null): boolean {
+  if (!state || !state.enabled) return false;
+  return (
+    state.status !== "checking" &&
+    state.status !== "downloading" &&
+    state.status !== "downloaded" &&
+    state.status !== "disabled"
+  );
 }

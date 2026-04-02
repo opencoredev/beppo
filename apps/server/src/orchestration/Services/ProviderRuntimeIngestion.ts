@@ -22,7 +22,13 @@ export interface ProviderRuntimeIngestionShape {
    * Uses an internal queue and continues after non-interrupt failures by
    * logging warnings.
    */
-  readonly start: Effect.Effect<void, never, Scope.Scope>;
+  readonly start: () => Effect.Effect<void, never, Scope.Scope>;
+
+  /**
+   * Resolves when the internal processing queue is empty and idle.
+   * Intended for test use to replace timing-sensitive sleeps.
+   */
+  readonly drain: Effect.Effect<void>;
 }
 
 /**

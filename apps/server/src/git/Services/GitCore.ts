@@ -22,7 +22,28 @@ import type {
   GitStatusResult,
 } from "@t3tools/contracts";
 
-import type { GitCommandError } from "../Errors.ts";
+import type { GitCommandError } from "@t3tools/contracts";
+
+export interface ExecuteGitInput {
+  readonly operation: string;
+  readonly cwd: string;
+  readonly args: ReadonlyArray<string>;
+  readonly stdin?: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly allowNonZeroExit?: boolean;
+  readonly timeoutMs?: number;
+  readonly maxOutputBytes?: number;
+  readonly truncateOutputAtMaxBytes?: boolean;
+  readonly progress?: ExecuteGitProgress;
+}
+
+export interface ExecuteGitResult {
+  readonly code: number;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly stdoutTruncated: boolean;
+  readonly stderrTruncated: boolean;
+}
 
 export interface GitStatusDetails extends Omit<GitStatusResult, "pr"> {
   upstreamRef: string | null;
@@ -31,6 +52,35 @@ export interface GitStatusDetails extends Omit<GitStatusResult, "pr"> {
 export interface GitPreparedCommitContext {
   stagedSummary: string;
   stagedPatch: string;
+}
+
+export interface ExecuteGitProgress {
+  readonly onStdoutLine?: (line: string) => Effect.Effect<void, never>;
+  readonly onStderrLine?: (line: string) => Effect.Effect<void, never>;
+  readonly onHookStarted?: (hookName: string) => Effect.Effect<void, never>;
+  readonly onHookFinished?: (input: {
+    hookName: string;
+    exitCode: number | null;
+    durationMs: number | null;
+  }) => Effect.Effect<void, never>;
+}
+
+export interface GitCommitProgress {
+  readonly onOutputLine?: (input: {
+    stream: "stdout" | "stderr";
+    text: string;
+  }) => Effect.Effect<void, never>;
+  readonly onHookStarted?: (hookName: string) => Effect.Effect<void, never>;
+  readonly onHookFinished?: (input: {
+    hookName: string;
+    exitCode: number | null;
+    durationMs: number | null;
+  }) => Effect.Effect<void, never>;
+}
+
+export interface GitCommitOptions {
+  readonly timeoutMs?: number;
+  readonly progress?: GitCommitProgress;
 }
 
 export interface GitPushResult {
@@ -46,6 +96,11 @@ export interface GitRangeContext {
   diffPatch: string;
 }
 
+export interface GitListWorkspaceFilesResult {
+  readonly paths: ReadonlyArray<string>;
+  readonly truncated: boolean;
+}
+
 export interface GitRenameBranchInput {
   cwd: string;
   oldBranch: string;
@@ -56,10 +111,41 @@ export interface GitRenameBranchResult {
   branch: string;
 }
 
+export interface GitFetchPullRequestBranchInput {
+  cwd: string;
+  prNumber: number;
+  branch: string;
+}
+
+export interface GitEnsureRemoteInput {
+  cwd: string;
+  preferredName: string;
+  url: string;
+}
+
+export interface GitFetchRemoteBranchInput {
+  cwd: string;
+  remoteName: string;
+  remoteBranch: string;
+  localBranch: string;
+}
+
+export interface GitSetBranchUpstreamInput {
+  cwd: string;
+  branch: string;
+  remoteName: string;
+  remoteBranch: string;
+}
+
 /**
  * GitCoreShape - Service API for low-level Git repository interactions.
  */
 export interface GitCoreShape {
+  /**
+   * Execute a raw Git command.
+   */
+  readonly execute: (input: ExecuteGitInput) => Effect.Effect<ExecuteGitResult, GitCommandError>;
+
   /**
    * Read Git status for a repository.
    */
@@ -75,6 +161,7 @@ export interface GitCoreShape {
    */
   readonly prepareCommitContext: (
     cwd: string,
+    filePaths?: readonly string[],
   ) => Effect.Effect<GitPreparedCommitContext | null, GitCommandError>;
 
   /**
@@ -84,6 +171,7 @@ export interface GitCoreShape {
     cwd: string,
     subject: string,
     body: string,
+    options?: GitCommitOptions,
   ) => Effect.Effect<{ commitSha: string }, GitCommandError>;
 
   /**
@@ -111,6 +199,26 @@ export interface GitCoreShape {
   ) => Effect.Effect<string | null, GitCommandError>;
 
   /**
+   * Determine whether the provided cwd is inside a git work tree.
+   */
+  readonly isInsideWorkTree: (cwd: string) => Effect.Effect<boolean, GitCommandError>;
+
+  /**
+   * List tracked and untracked workspace file paths relative to cwd.
+   */
+  readonly listWorkspaceFiles: (
+    cwd: string,
+  ) => Effect.Effect<GitListWorkspaceFilesResult, GitCommandError>;
+
+  /**
+   * Remove gitignored paths from a relative path list.
+   */
+  readonly filterIgnoredPaths: (
+    cwd: string,
+    relativePaths: ReadonlyArray<string>,
+  ) => Effect.Effect<ReadonlyArray<string>, GitCommandError>;
+
+  /**
    * List local + remote branches and branch metadata.
    */
   readonly listBranches: (
@@ -128,6 +236,32 @@ export interface GitCoreShape {
   readonly createWorktree: (
     input: GitCreateWorktreeInput,
   ) => Effect.Effect<GitCreateWorktreeResult, GitCommandError>;
+
+  /**
+   * Materialize a GitHub pull request head as a local branch without switching checkout.
+   */
+  readonly fetchPullRequestBranch: (
+    input: GitFetchPullRequestBranchInput,
+  ) => Effect.Effect<void, GitCommandError>;
+
+  /**
+   * Ensure a named remote exists for the provided URL, returning the reused or created remote name.
+   */
+  readonly ensureRemote: (input: GitEnsureRemoteInput) => Effect.Effect<string, GitCommandError>;
+
+  /**
+   * Fetch a remote branch into a local branch without checkout.
+   */
+  readonly fetchRemoteBranch: (
+    input: GitFetchRemoteBranchInput,
+  ) => Effect.Effect<void, GitCommandError>;
+
+  /**
+   * Set the upstream tracking branch for a local branch.
+   */
+  readonly setBranchUpstream: (
+    input: GitSetBranchUpstreamInput,
+  ) => Effect.Effect<void, GitCommandError>;
 
   /**
    * Remove an existing worktree.

@@ -3,35 +3,31 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { assertFailure } from "@effect/vitest/utils";
 import { Effect, FileSystem, Layer, Logger, Path, Schema } from "effect";
-import { ServerConfig, type ServerConfigShape } from "./config";
+import { ServerConfig } from "./config";
 
 import {
   DEFAULT_KEYBINDINGS,
   Keybindings,
-  KeybindingsConfigError,
   KeybindingsLive,
   ResolvedKeybindingFromConfig,
   compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
   parseKeybindingShortcut,
 } from "./keybindings";
+import { KeybindingsConfigError } from "@t3tools/contracts";
 
 const KeybindingsConfigJson = Schema.fromJsonString(KeybindingsConfig);
-const makeKeybindingsLayer = () =>
-  KeybindingsLive.pipe(
+const makeKeybindingsLayer = () => {
+  return KeybindingsLive.pipe(
     Layer.provideMerge(
-      Layer.effect(
-        ServerConfig,
-        Effect.gen(function* () {
-          const fs = yield* FileSystem.FileSystem;
-          const { join } = yield* Path.Path;
-          const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-server-config-test-" });
-          const configPath = join(dir, "keybindings.json");
-          return { keybindingsConfigPath: configPath } as ServerConfigShape;
+      Layer.fresh(
+        ServerConfig.layerTest(process.cwd(), {
+          prefix: "t3code-keybindings-test-",
         }),
       ),
     ),
   );
+};
 
 const toDetailResult = <A, R>(effect: Effect.Effect<A, KeybindingsConfigError, R>) =>
   effect.pipe(
@@ -42,7 +38,9 @@ const toDetailResult = <A, R>(effect: Effect.Effect<A, KeybindingsConfigError, R
 const writeKeybindingsConfig = (configPath: string, rules: readonly KeybindingRule[]) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
     const encoded = yield* Schema.encodeEffect(KeybindingsConfigJson)(rules);
+    yield* fileSystem.makeDirectory(path.dirname(configPath), { recursive: true });
     yield* fileSystem.writeFileString(configPath, encoded);
   });
 
@@ -167,6 +165,19 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 
+  it.effect("ships configurable thread navigation defaults", () =>
+    Effect.sync(() => {
+      const defaultsByCommand = new Map(
+        DEFAULT_KEYBINDINGS.map((binding) => [binding.command, binding.key] as const),
+      );
+
+      assert.equal(defaultsByCommand.get("thread.previous"), "mod+shift+[");
+      assert.equal(defaultsByCommand.get("thread.next"), "mod+shift+]");
+      assert.equal(defaultsByCommand.get("thread.jump.1"), "mod+1");
+      assert.equal(defaultsByCommand.get("thread.jump.9"), "mod+9");
+    }),
+  );
+
   it.effect("uses defaults in runtime when config is malformed without overriding file", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -211,7 +222,9 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       });
 
       assert.isTrue(configState.keybindings.some((entry) => entry.command === "terminal.toggle"));
-      assert.isFalse(configState.keybindings.some((entry) => String(entry.command) === "invalid.command"));
+      assert.isFalse(
+        configState.keybindings.some((entry) => String(entry.command) === "invalid.command"),
+      );
       assert.deepEqual(configState.issues, [
         {
           kind: "keybindings.invalid-entry",
