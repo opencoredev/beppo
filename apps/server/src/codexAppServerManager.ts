@@ -20,6 +20,7 @@ import {
 } from "@t3tools/contracts";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { Effect, ServiceMap } from "effect";
+import { buildWslProcessCommand } from "./wsl";
 
 import {
   formatCodexCliUpgradeMessage,
@@ -459,19 +460,26 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
       const codexBinaryPath = input.binaryPath;
       const codexHomePath = input.homePath;
+      const childEnv = {
+        ...process.env,
+        ...(codexHomePath ? { CODEX_HOME: codexHomePath } : {}),
+      };
       this.assertSupportedCodexCliVersion({
         binaryPath: codexBinaryPath,
         cwd: resolvedCwd,
         ...(codexHomePath ? { homePath: codexHomePath } : {}),
       });
-      const child = spawn(codexBinaryPath, ["app-server"], {
+      const wslCommand = buildWslProcessCommand({
+        command: codexBinaryPath,
+        args: ["app-server"],
         cwd: resolvedCwd,
-        env: {
-          ...process.env,
-          ...(codexHomePath ? { CODEX_HOME: codexHomePath } : {}),
-        },
+        env: childEnv,
+      });
+      const child = spawn(wslCommand?.command ?? codexBinaryPath, wslCommand?.args ?? ["app-server"], {
+        cwd: wslCommand?.cwd ?? resolvedCwd,
+        env: wslCommand?.env ?? childEnv,
         stdio: ["pipe", "pipe", "pipe"],
-        shell: process.platform === "win32",
+        shell: wslCommand ? false : process.platform === "win32",
       });
       const output = readline.createInterface({ input: child.stdout });
 

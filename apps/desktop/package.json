@@ -1,30 +1,27 @@
 {
   "name": "@t3tools/desktop",
-  "version": "0.0.15",
+  "version": "0.0.18",
   "private": true,
-  "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "bun run --parallel dev:bundle dev:electron",
-    "dev:bundle": "tsdown --watch",
-    "dev:electron": "bun run scripts/dev-electron.mjs",
-    "build": "tsdown",
-    "start": "bun run scripts/start-electron.mjs",
+    "dev": "bunx --bun electrobun dev --watch",
+    "build": "bunx --bun electrobun build",
+    "start": "bunx --bun electrobun run",
+    "package": "bunx --bun electrobun build --env=stable",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests",
+    "test": "bunx --bun vitest run --passWithNoTests",
     "smoke-test": "node scripts/smoke-test.mjs"
   },
   "dependencies": {
     "effect": "catalog:",
-    "electron": "40.6.0",
-    "electron-updater": "^6.6.2"
+    "electrobun": "^1.15.1"
   },
   "devDependencies": {
     "@t3tools/contracts": "workspace:*",
     "@t3tools/shared": "workspace:*",
+    "@types/bun": "catalog:",
     "@types/node": "catalog:",
-    "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },
-  "productName": "T3 Code (Alpha)"
+  "productName": "Beppo"
 }

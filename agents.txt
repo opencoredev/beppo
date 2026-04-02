@@ -1,0 +1,12 @@
+Beppo agent instructions
+
+Canonical repository instructions live in `AGENTS.md`.
+
+This lightweight entrypoint exists for agent runtimes and desktop integrations
+that look for `agents.txt` first.
+
+Read `AGENTS.md` for:
+- task completion requirements
+- package roles
+- Codex app-server constraints
+- skills and coordination rules

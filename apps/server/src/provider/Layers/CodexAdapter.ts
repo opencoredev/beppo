@@ -126,8 +126,14 @@ function normalizeCodexTokenUsage(value: unknown): ThreadTokenUsageSnapshot | un
 
   const totalProcessedTokens =
     asNumber(totalUsage?.total_tokens) ?? asNumber(totalUsage?.totalTokens);
-  const usedTokens =
-    asNumber(lastUsage?.total_tokens) ?? asNumber(lastUsage?.totalTokens) ?? totalProcessedTokens;
+  // Prefer the last request's total_tokens (current context window size).
+  // Only fall back to the pre-computed usedTokens field (which Codex may
+  // provide at the top-level), and totalProcessedTokens as a last resort.
+  // This prevents the accumulated total from being shown as the context
+  // window size when last_token_usage is absent.
+  const lastTotalTokens = asNumber(lastUsage?.total_tokens) ?? asNumber(lastUsage?.totalTokens);
+  const topLevelUsedTokens = asNumber(usage?.usedTokens);
+  const usedTokens = lastTotalTokens ?? topLevelUsedTokens ?? totalProcessedTokens;
   if (usedTokens === undefined || usedTokens <= 0) {
     return undefined;
   }

@@ -43,12 +43,24 @@
     "./String": {
       "types": "./src/String.ts",
       "import": "./src/String.ts"
+    },
+    "./wsl": {
+      "types": "./src/wsl.ts",
+      "import": "./src/wsl.ts"
+    },
+    "./archive": {
+      "types": "./src/archive.ts",
+      "import": "./src/archive.ts"
+    },
+    "./branding": {
+      "types": "./src/branding.ts",
+      "import": "./src/branding.ts"
     }
   },
   "scripts": {
     "prepare": "effect-language-service patch",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "bunx --bun vitest run"
   },
   "dependencies": {
     "@t3tools/contracts": "workspace:*",

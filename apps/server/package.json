@@ -1,10 +1,10 @@
 {
   "name": "t3",
-  "version": "0.0.15",
+  "version": "0.0.18",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pingdotgg/t3code",
+    "url": "https://github.com/opencoredev/beppo",
     "directory": "apps/server"
   },
   "bin": {
@@ -16,11 +16,11 @@
   "type": "module",
   "scripts": {
     "dev": "bun run src/bin.ts",
-    "build": "node scripts/cli.ts build",
+    "build": "bun scripts/cli.ts build",
     "start": "node dist/bin.mjs",
     "prepare": "effect-language-service patch",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "bunx --bun vitest run"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.77",

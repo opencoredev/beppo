@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
@@ -14,8 +15,10 @@ const buildSourcemap =
     : sourcemapEnv === "hidden"
       ? "hidden"
       : true;
+const srcPath = fileURLToPath(new URL("./src", import.meta.url));
 
 export default defineConfig({
+  base: "./",
   plugins: [
     tanstackRouter(),
     react(),
@@ -38,6 +41,9 @@ export default defineConfig({
     "import.meta.env.APP_VERSION": JSON.stringify(pkg.version),
   },
   resolve: {
+    alias: {
+      "~": srcPath,
+    },
     tsconfigPaths: true,
   },
   server: {
@@ -55,5 +61,6 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     sourcemap: buildSourcemap,
+    target: "es2020",
   },
 });

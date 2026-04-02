@@ -1,4 +1,4 @@
-name: Release Desktop
+name: Release Beppo
 
 on:
   push:
@@ -90,23 +90,23 @@ jobs:
           - label: macOS arm64
             runner: macos-14
             platform: mac
-            target: dmg
             arch: arm64
+            electrobun_target: macos-arm64
           - label: macOS x64
             runner: macos-15-intel
             platform: mac
-            target: dmg
             arch: x64
+            electrobun_target: macos-x64
           - label: Linux x64
             runner: ubuntu-24.04
             platform: linux
-            target: AppImage
             arch: x64
+            electrobun_target: linux-x64
           - label: Windows x64
             runner: windows-2022
             platform: win
-            target: nsis
             arch: x64
+            electrobun_target: win-x64
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -124,6 +124,70 @@ jobs:
         with:
           node-version-file: package.json
 
+      - name: Import Apple code-signing certificate
+        if: ${{ matrix.platform == 'mac' }}
+        shell: bash
+        env:
+          MAC_CERTIFICATE_BASE64: ${{ secrets.CSC_LINK }}
+          MAC_CERTIFICATE_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${MAC_CERTIFICATE_BASE64:-}" || -z "${MAC_CERTIFICATE_PASSWORD:-}" ]]; then
+            echo "Apple signing certificate unavailable; skipping certificate import."
+            exit 0
+          fi
+
+          keychain_path="$RUNNER_TEMP/beppo-signing.keychain-db"
+          keychain_password="$(uuidgen)"
+          certificate_path="$RUNNER_TEMP/beppo-signing-cert.p12"
+
+          printf '%s' "$MAC_CERTIFICATE_BASE64" | base64 --decode > "$certificate_path"
+
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" -k "$keychain_path" -P "$MAC_CERTIFICATE_PASSWORD" -A -f pkcs12
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain_path"
+
+          existing_keychains="$(security list-keychains -d user | tr -d '\"')"
+          security list-keychains -d user -s "$keychain_path" $existing_keychains
+
+      - name: Resolve Apple signing environment
+        if: ${{ matrix.platform == 'mac' }}
+        id: mac_signing
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ELECTROBUN_APPLEID_SECRET: ${{ secrets.ELECTROBUN_APPLEID }}
+          ELECTROBUN_APPLEIDPASS_SECRET: ${{ secrets.ELECTROBUN_APPLEIDPASS }}
+          ELECTROBUN_TEAMID_SECRET: ${{ secrets.ELECTROBUN_TEAMID }}
+        run: |
+          set -euo pipefail
+
+          developer_id="$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application[^"]*\)".*/\1/p' | head -n 1)"
+          if [[ -n "$developer_id" ]]; then
+            echo "developer_id=$developer_id" >> "$GITHUB_OUTPUT"
+            echo "codesign_enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "codesign_enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          apple_id="${ELECTROBUN_APPLEID_SECRET:-${APPLE_ID:-}}"
+          apple_id_pass="${ELECTROBUN_APPLEIDPASS_SECRET:-${APPLE_APP_SPECIFIC_PASSWORD:-}}"
+          team_id="${ELECTROBUN_TEAMID_SECRET:-${APPLE_TEAM_ID:-}}"
+
+          if [[ -n "$apple_id" && -n "$apple_id_pass" && -n "$team_id" ]]; then
+            echo "apple_id=$apple_id" >> "$GITHUB_OUTPUT"
+            echo "apple_id_pass=$apple_id_pass" >> "$GITHUB_OUTPUT"
+            echo "team_id=$team_id" >> "$GITHUB_OUTPUT"
+            echo "notarize_enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "notarize_enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
@@ -132,14 +196,26 @@ jobs:
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
         run: node scripts/update-release-package-versions.ts "${RELEASE_VERSION}"
 
+      - name: Build bundled web/server assets
+        if: ${{ matrix.platform != 'win' }}
+        run: bun run build --filter=@t3tools/web --filter=t3
+
+      - name: Build bundled web/server assets
+        if: ${{ matrix.platform == 'win' }}
+        shell: pwsh
+        run: |
+          bun run --cwd packages/contracts build
+          bun run --cwd apps/web build
+          bun run --cwd apps/server build
+
       - name: Build desktop artifact
+        if: ${{ matrix.platform != 'win' }}
         shell: bash
         env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          ELECTROBUN_DEVELOPER_ID: ${{ steps.mac_signing.outputs.developer_id }}
+          ELECTROBUN_APPLEID: ${{ steps.mac_signing.outputs.apple_id }}
+          ELECTROBUN_APPLEIDPASS: ${{ steps.mac_signing.outputs.apple_id_pass }}
+          ELECTROBUN_TEAMID: ${{ steps.mac_signing.outputs.team_id }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
@@ -147,19 +223,12 @@ jobs:
           AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
           AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
           AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
+          ELECTROBUN_TARGETS: ${{ matrix.electrobun_target }}
+          T3CODE_DESKTOP_VERSION: ${{ needs.preflight.outputs.version }}
+          T3CODE_DESKTOP_UPDATE_BASE_URL: https://github.com/opencoredev/beppo/releases/latest/download
           BUILD_PLATFORM: ${{ matrix.platform }}
-          BUILD_TARGET: ${{ matrix.target }}
           BUILD_ARCH: ${{ matrix.arch }}
-          BUILD_VERSION: ${{ needs.preflight.outputs.version }}
         run: |
-          args=(
-            --platform "${BUILD_PLATFORM}"
-            --target "${BUILD_TARGET}"
-            --arch "${BUILD_ARCH}"
-            --build-version "${BUILD_VERSION}"
-            --verbose
-          )
-
           has_all() {
             for value in "$@"; do
               if [[ -z "$value" ]]; then
@@ -170,14 +239,16 @@ jobs:
           }
 
           if [[ "${BUILD_PLATFORM}" == "mac" ]]; then
-            if has_all "$CSC_LINK" "$CSC_KEY_PASSWORD" "$APPLE_API_KEY" "$APPLE_API_KEY_ID" "$APPLE_API_ISSUER"; then
-              key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
-              printf '%s' "$APPLE_API_KEY" > "$key_path"
-              export APPLE_API_KEY="$key_path"
-              echo "macOS signing enabled."
-              args+=(--signed)
+            if [[ "${{ steps.mac_signing.outputs.codesign_enabled }}" == "true" ]]; then
+              echo "macOS codesigning enabled."
             else
-              echo "macOS signing disabled (missing one or more Apple signing secrets)."
+              echo "macOS codesigning disabled (certificate or identity unavailable)."
+            fi
+
+            if [[ "${{ steps.mac_signing.outputs.notarize_enabled }}" == "true" ]]; then
+              echo "macOS notarization enabled."
+            else
+              echo "macOS notarization disabled (Apple ID credentials unavailable)."
             fi
           elif [[ "${BUILD_PLATFORM}" == "win" ]]; then
             if has_all \
@@ -188,16 +259,52 @@ jobs:
               "$AZURE_TRUSTED_SIGNING_ACCOUNT_NAME" \
               "$AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME" \
               "$AZURE_TRUSTED_SIGNING_PUBLISHER_NAME"; then
-              echo "Windows signing enabled (Azure Trusted Signing)."
-              args+=(--signed)
+              echo "Windows signing configuration detected."
             else
-              echo "Windows signing disabled (missing one or more Azure Trusted Signing secrets)."
+              echo "Windows signing unavailable for this Electrobun release path."
             fi
           else
             echo "Signing disabled for ${BUILD_PLATFORM}."
           fi
 
-          bun run dist:desktop:artifact -- "${args[@]}"
+          bun run dist:desktop:artifact
+
+      - name: Build desktop artifact
+        if: ${{ matrix.platform == 'win' }}
+        shell: pwsh
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
+          AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
+          ELECTROBUN_TARGETS: ${{ matrix.electrobun_target }}
+          T3CODE_DESKTOP_VERSION: ${{ needs.preflight.outputs.version }}
+          T3CODE_DESKTOP_UPDATE_BASE_URL: https://github.com/opencoredev/beppo/releases/latest/download
+        run: |
+          $requiredVars = @(
+            "AZURE_TENANT_ID",
+            "AZURE_CLIENT_ID",
+            "AZURE_CLIENT_SECRET",
+            "AZURE_TRUSTED_SIGNING_ENDPOINT",
+            "AZURE_TRUSTED_SIGNING_ACCOUNT_NAME",
+            "AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME",
+            "AZURE_TRUSTED_SIGNING_PUBLISHER_NAME"
+          )
+
+          $missingVars = $requiredVars | Where-Object {
+            [string]::IsNullOrWhiteSpace((Get-Item -Path "Env:$_" -ErrorAction SilentlyContinue).Value)
+          }
+
+          if ($missingVars.Count -eq 0) {
+            Write-Host "Windows signing enabled (Azure Trusted Signing)."
+          } else {
+            Write-Host "Windows signing disabled (missing one or more Azure Trusted Signing secrets)."
+          }
+
+          bun run dist:desktop:artifact
 
       - name: Collect release assets
         shell: bash
@@ -209,23 +316,11 @@ jobs:
           mkdir -p release-publish
 
           shopt -s nullglob
-          for pattern in \
-            "release/*.dmg" \
-            "release/*.zip" \
-            "release/*.AppImage" \
-            "release/*.exe" \
-            "release/*.blockmap" \
-            "release/latest*.yml"; do
-            for file in $pattern; do
+          for file in apps/desktop/artifacts/*; do
+            if [[ -f "$file" ]]; then
               cp "$file" release-publish/
-            done
-          done
-
-          if [[ "${BUILD_PLATFORM}" == "mac" && "${BUILD_ARCH}" != "arm64" ]]; then
-            if [[ -f release-publish/latest-mac.yml ]]; then
-              mv release-publish/latest-mac.yml "release-publish/latest-mac-${BUILD_ARCH}.yml"
             fi
-          fi
+          done
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
@@ -237,7 +332,10 @@ jobs:
   publish_cli:
     name: Publish CLI to npm
     needs: [preflight, build]
+    continue-on-error: true
     runs-on: ubuntu-24.04
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -256,7 +354,11 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Skip npm publish when token is unavailable
+        if: ${{ !env.NODE_AUTH_TOKEN }}
+        run: echo "NPM_TOKEN is not configured. Skipping CLI publish."
 
       - name: Align package versions to release version
         env:
@@ -264,16 +366,18 @@ jobs:
         run: node scripts/update-release-package-versions.ts "${RELEASE_VERSION}"
 
       - name: Build CLI package
+        if: ${{ env.NODE_AUTH_TOKEN }}
         run: bun run build --filter=@t3tools/web --filter=t3
 
       - name: Publish CLI package
+        if: ${{ env.NODE_AUTH_TOKEN }}
         env:
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
-        run: node apps/server/scripts/cli.ts publish --tag latest --app-version "${RELEASE_VERSION}" --verbose
+        run: node apps/server/scripts/cli.ts publish --tag latest --app-version "${RELEASE_VERSION}" --provenance --verbose
 
   release:
     name: Publish GitHub Release
-    needs: [preflight, build, publish_cli]
+    needs: [preflight, build]
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -305,17 +409,12 @@ jobs:
         with:
           tag_name: ${{ needs.preflight.outputs.tag }}
           target_commitish: ${{ needs.preflight.outputs.ref }}
-          name: T3 Code v${{ needs.preflight.outputs.version }}
+          name: Beppo v${{ needs.preflight.outputs.version }}
           generate_release_notes: true
           prerelease: ${{ needs.preflight.outputs.is_prerelease }}
           make_latest: ${{ needs.preflight.outputs.make_latest }}
           files: |
-            release-assets/*.dmg
-            release-assets/*.zip
-            release-assets/*.AppImage
-            release-assets/*.exe
-            release-assets/*.blockmap
-            release-assets/latest*.yml
+            release-assets/*
           fail_on_unmatched_files: true
 
   finalize:

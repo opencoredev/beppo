@@ -230,7 +230,24 @@ function uniqueShellCandidates(candidates: Array<ShellCandidate | null>): ShellC
   return ordered;
 }
 
-function resolveShellCandidates(shellResolver: () => string): ShellCandidate[] {
+function resolvePosixShellCandidates(shellResolver: () => string): ShellCandidate[] {
+  return uniqueShellCandidates([
+    shellCandidateFromCommand(normalizeShellCommand(shellResolver())),
+    shellCandidateFromCommand(normalizeShellCommand(process.env.SHELL)),
+    shellCandidateFromCommand("/bin/zsh"),
+    shellCandidateFromCommand("/bin/bash"),
+    shellCandidateFromCommand("/bin/sh"),
+    shellCandidateFromCommand("zsh"),
+    shellCandidateFromCommand("bash"),
+    shellCandidateFromCommand("sh"),
+  ]);
+}
+
+function resolveShellCandidates(shellResolver: () => string, cwd?: string): ShellCandidate[] {
+  if (cwd && resolveWslWorkspace(cwd)) {
+    return resolvePosixShellCandidates(shellResolver);
+  }
+
   const requested = shellCandidateFromCommand(normalizeShellCommand(shellResolver()));
 
   if (process.platform === "win32") {
@@ -242,16 +259,7 @@ function resolveShellCandidates(shellResolver: () => string): ShellCandidate[] {
     ]);
   }
 
-  return uniqueShellCandidates([
-    requested,
-    shellCandidateFromCommand(normalizeShellCommand(process.env.SHELL)),
-    shellCandidateFromCommand("/bin/zsh"),
-    shellCandidateFromCommand("/bin/bash"),
-    shellCandidateFromCommand("/bin/sh"),
-    shellCandidateFromCommand("zsh"),
-    shellCandidateFromCommand("bash"),
-    shellCandidateFromCommand("sh"),
-  ]);
+  return uniqueShellCandidates([requested, ...resolvePosixShellCandidates(shellResolver)]);
 }
 
 function isRetryableShellSpawnError(error: PtySpawnError): boolean {
@@ -810,6 +818,394 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         ),
       );
       if (!terminated) {
+
+    session.status = "starting";
+    session.cwd = input.cwd;
+    session.cols = input.cols;
+    session.rows = input.rows;
+    session.exitCode = null;
+    session.exitSignal = null;
+    session.hasRunningSubprocess = false;
+    session.updatedAt = new Date().toISOString();
+
+    let ptyProcess: PtyProcess | null = null;
+    let startedShell: string | null = null;
+    try {
+      const shellCandidates = resolveShellCandidates(this.shellResolver);
+      const terminalEnv = createTerminalSpawnEnv(process.env, session.runtimeEnv);
+      let lastSpawnError: unknown = null;
+
+      const spawnWithCandidate = (candidate: ShellCandidate) =>
+        Effect.runPromise(
+          this.ptyAdapter.spawn({
+            shell: candidate.shell,
+            ...(candidate.args ? { args: candidate.args } : {}),
+            cwd: session.cwd,
+            cols: session.cols,
+            rows: session.rows,
+            env: terminalEnv,
+          }),
+        );
+
+      const trySpawn = async (
+        candidates: ShellCandidate[],
+        index = 0,
+      ): Promise<{ process: PtyProcess; shellLabel: string } | null> => {
+        if (index >= candidates.length) {
+          return null;
+        }
+        const candidate = candidates[index];
+        if (!candidate) {
+          return null;
+        }
+
+        try {
+          const process = await spawnWithCandidate(candidate);
+          return { process, shellLabel: formatShellCandidate(candidate) };
+        } catch (error) {
+          lastSpawnError = error;
+          if (!isRetryableShellSpawnError(error)) {
+            throw error;
+          }
+          return trySpawn(candidates, index + 1);
+        }
+      };
+
+      const spawnResult = await trySpawn(shellCandidates);
+      if (spawnResult) {
+        ptyProcess = spawnResult.process;
+        startedShell = spawnResult.shellLabel;
+      }
+
+      if (!ptyProcess) {
+        const detail =
+          lastSpawnError instanceof Error ? lastSpawnError.message : "Terminal start failed";
+        const tried =
+          shellCandidates.length > 0
+            ? ` Tried shells: ${shellCandidates.map((candidate) => formatShellCandidate(candidate)).join(", ")}.`
+            : "";
+        throw new Error(`${detail}.${tried}`.trim());
+      }
+
+      session.process = ptyProcess;
+      session.pid = ptyProcess.pid;
+      session.status = "running";
+      session.updatedAt = new Date().toISOString();
+      session.unsubscribeData = ptyProcess.onData((data) => {
+        this.onProcessData(session, data);
+      });
+      session.unsubscribeExit = ptyProcess.onExit((event) => {
+        this.onProcessExit(session, event);
+      });
+      this.updateSubprocessPollingState();
+      this.emitEvent({
+        type: eventType,
+        threadId: session.threadId,
+        terminalId: session.terminalId,
+        createdAt: new Date().toISOString(),
+        snapshot: this.snapshot(session),
+      });
+    } catch (error) {
+      if (ptyProcess) {
+        this.killProcessWithEscalation(ptyProcess, session.threadId, session.terminalId);
+      }
+      session.status = "error";
+      session.pid = null;
+      session.process = null;
+      session.hasRunningSubprocess = false;
+      session.updatedAt = new Date().toISOString();
+      this.evictInactiveSessionsIfNeeded();
+      this.updateSubprocessPollingState();
+      const message = error instanceof Error ? error.message : "Terminal start failed";
+      this.emitEvent({
+        type: "error",
+        threadId: session.threadId,
+        terminalId: session.terminalId,
+        createdAt: new Date().toISOString(),
+        message,
+      });
+      this.logger.error("failed to start terminal", {
+        threadId: session.threadId,
+        terminalId: session.terminalId,
+        error: message,
+        ...(startedShell ? { shell: startedShell } : {}),
+      });
+    }
+  }
+
+  private onProcessData(session: TerminalSessionState, data: string): void {
+    session.history = capHistory(`${session.history}${data}`, this.historyLineLimit);
+    session.updatedAt = new Date().toISOString();
+    this.queuePersist(session.threadId, session.terminalId, session.history);
+    this.emitEvent({
+      type: "output",
+      threadId: session.threadId,
+      terminalId: session.terminalId,
+      createdAt: new Date().toISOString(),
+      data,
+    });
+  }
+
+  private onProcessExit(session: TerminalSessionState, event: PtyExitEvent): void {
+    this.clearKillEscalationTimer(session.process);
+    this.cleanupProcessHandles(session);
+    session.process = null;
+    session.pid = null;
+    session.hasRunningSubprocess = false;
+    session.status = "exited";
+    session.exitCode = Number.isInteger(event.exitCode) ? event.exitCode : null;
+    session.exitSignal = Number.isInteger(event.signal) ? event.signal : null;
+    session.updatedAt = new Date().toISOString();
+    this.emitEvent({
+      type: "exited",
+      threadId: session.threadId,
+      terminalId: session.terminalId,
+      createdAt: new Date().toISOString(),
+      exitCode: session.exitCode,
+      exitSignal: session.exitSignal,
+    });
+    this.evictInactiveSessionsIfNeeded();
+    this.updateSubprocessPollingState();
+  }
+
+  private stopProcess(session: TerminalSessionState): void {
+    const process = session.process;
+    if (!process) return;
+    this.cleanupProcessHandles(session);
+    session.process = null;
+    session.pid = null;
+    session.hasRunningSubprocess = false;
+    session.status = "exited";
+    session.updatedAt = new Date().toISOString();
+    this.killProcessWithEscalation(process, session.threadId, session.terminalId);
+    this.evictInactiveSessionsIfNeeded();
+    this.updateSubprocessPollingState();
+  }
+
+  private cleanupProcessHandles(session: TerminalSessionState): void {
+    session.unsubscribeData?.();
+    session.unsubscribeData = null;
+    session.unsubscribeExit?.();
+    session.unsubscribeExit = null;
+  }
+
+  private clearKillEscalationTimer(process: PtyProcess | null): void {
+    if (!process) return;
+    const timer = this.killEscalationTimers.get(process);
+    if (!timer) return;
+    clearTimeout(timer);
+    this.killEscalationTimers.delete(process);
+  }
+
+  private killProcessWithEscalation(
+    process: PtyProcess,
+    threadId: string,
+    terminalId: string,
+  ): void {
+    this.clearKillEscalationTimer(process);
+    try {
+      process.kill("SIGTERM");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn("failed to kill terminal process", {
+        threadId,
+        terminalId,
+        signal: "SIGTERM",
+        error: message,
+      });
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      this.killEscalationTimers.delete(process);
+      try {
+        process.kill("SIGKILL");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn("failed to force-kill terminal process", {
+          threadId,
+          terminalId,
+          signal: "SIGKILL",
+          error: message,
+        });
+      }
+    }, this.processKillGraceMs);
+    timer.unref?.();
+    this.killEscalationTimers.set(process, timer);
+  }
+
+  private evictInactiveSessionsIfNeeded(): void {
+    const inactiveSessions = [...this.sessions.values()].filter(
+      (session) => session.status !== "running",
+    );
+    if (inactiveSessions.length <= this.maxRetainedInactiveSessions) {
+      return;
+    }
+
+    inactiveSessions.sort(
+      (left, right) =>
+        left.updatedAt.localeCompare(right.updatedAt) ||
+        left.threadId.localeCompare(right.threadId) ||
+        left.terminalId.localeCompare(right.terminalId),
+    );
+    const toEvict = inactiveSessions.length - this.maxRetainedInactiveSessions;
+    for (const session of inactiveSessions.slice(0, toEvict)) {
+      const key = toSessionKey(session.threadId, session.terminalId);
+      this.sessions.delete(key);
+      this.clearPersistTimer(session.threadId, session.terminalId);
+      this.pendingPersistHistory.delete(key);
+      this.persistQueues.delete(key);
+      this.clearKillEscalationTimer(session.process);
+    }
+  }
+
+  private queuePersist(threadId: string, terminalId: string, history: string): void {
+    const persistenceKey = toSessionKey(threadId, terminalId);
+    this.pendingPersistHistory.set(persistenceKey, history);
+    this.schedulePersist(threadId, terminalId);
+  }
+
+  private async persistHistory(
+    threadId: string,
+    terminalId: string,
+    history: string,
+  ): Promise<void> {
+    const persistenceKey = toSessionKey(threadId, terminalId);
+    this.clearPersistTimer(threadId, terminalId);
+    this.pendingPersistHistory.delete(persistenceKey);
+    await this.enqueuePersistWrite(threadId, terminalId, history);
+  }
+
+  private enqueuePersistWrite(
+    threadId: string,
+    terminalId: string,
+    history: string,
+  ): Promise<void> {
+    const persistenceKey = toSessionKey(threadId, terminalId);
+    const task = async () => {
+      await fs.promises.writeFile(this.historyPath(threadId, terminalId), history, "utf8");
+    };
+    const previous = this.persistQueues.get(persistenceKey) ?? Promise.resolve();
+    const next = previous
+      .catch(() => undefined)
+      .then(task)
+      .catch((error) => {
+        this.logger.warn("failed to persist terminal history", {
+          threadId,
+          terminalId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    this.persistQueues.set(persistenceKey, next);
+    const finalized = next.finally(() => {
+      if (this.persistQueues.get(persistenceKey) === next) {
+        this.persistQueues.delete(persistenceKey);
+      }
+      if (
+        this.pendingPersistHistory.has(persistenceKey) &&
+        !this.persistTimers.has(persistenceKey)
+      ) {
+        this.schedulePersist(threadId, terminalId);
+      }
+    });
+    void finalized.catch(() => undefined);
+    return finalized;
+  }
+
+  private schedulePersist(threadId: string, terminalId: string): void {
+    const persistenceKey = toSessionKey(threadId, terminalId);
+    if (this.persistTimers.has(persistenceKey)) return;
+    const timer = setTimeout(() => {
+      this.persistTimers.delete(persistenceKey);
+      const pendingHistory = this.pendingPersistHistory.get(persistenceKey);
+      if (pendingHistory === undefined) return;
+      this.pendingPersistHistory.delete(persistenceKey);
+      void this.enqueuePersistWrite(threadId, terminalId, pendingHistory);
+    }, this.persistDebounceMs);
+    this.persistTimers.set(persistenceKey, timer);
+  }
+
+  private clearPersistTimer(threadId: string, terminalId: string): void {
+    const persistenceKey = toSessionKey(threadId, terminalId);
+    const timer = this.persistTimers.get(persistenceKey);
+    if (!timer) return;
+    clearTimeout(timer);
+    this.persistTimers.delete(persistenceKey);
+  }
+
+  private async readHistory(threadId: string, terminalId: string): Promise<string> {
+    const nextPath = this.historyPath(threadId, terminalId);
+    try {
+      const raw = await fs.promises.readFile(nextPath, "utf8");
+      const capped = capHistory(raw, this.historyLineLimit);
+      if (capped !== raw) {
+        await fs.promises.writeFile(nextPath, capped, "utf8");
+      }
+      return capped;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+
+    if (terminalId !== DEFAULT_TERMINAL_ID) {
+      return "";
+    }
+
+    const legacyPath = this.legacyHistoryPath(threadId);
+    try {
+      const raw = await fs.promises.readFile(legacyPath, "utf8");
+      const capped = capHistory(raw, this.historyLineLimit);
+
+      // Migrate legacy transcript filename to the terminal-scoped path.
+      await fs.promises.writeFile(nextPath, capped, "utf8");
+      try {
+        await fs.promises.rm(legacyPath, { force: true });
+      } catch (cleanupError) {
+        this.logger.warn("failed to remove legacy terminal history", {
+          threadId,
+          error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+        });
+      }
+
+      return capped;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return "";
+      }
+      throw error;
+    }
+  }
+
+  private async deleteHistory(threadId: string, terminalId: string): Promise<void> {
+    const deletions = [fs.promises.rm(this.historyPath(threadId, terminalId), { force: true })];
+    if (terminalId === DEFAULT_TERMINAL_ID) {
+      deletions.push(fs.promises.rm(this.legacyHistoryPath(threadId), { force: true }));
+    }
+    try {
+      await Promise.all(deletions);
+    } catch (error) {
+      this.logger.warn("failed to delete terminal history", {
+        threadId,
+        terminalId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async flushPersistQueue(threadId: string, terminalId: string): Promise<void> {
+    const persistenceKey = toSessionKey(threadId, terminalId);
+    this.clearPersistTimer(threadId, terminalId);
+
+    while (true) {
+      const pendingHistory = this.pendingPersistHistory.get(persistenceKey);
+      if (pendingHistory !== undefined) {
+        this.pendingPersistHistory.delete(persistenceKey);
+        await this.enqueuePersistWrite(threadId, terminalId, pendingHistory);
+      }
+
+      const pending = this.persistQueues.get(persistenceKey);
+      if (!pending) {
         return;
       }
 

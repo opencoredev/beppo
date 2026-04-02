@@ -1,5 +1,6 @@
 import * as OS from "node:os";
 import { Effect, Path } from "effect";
+import { APP_HIDDEN_DIR } from "@t3tools/shared/branding";
 import { readPathFromLoginShell, resolveLoginShell } from "@t3tools/shared/shell";
 
 export function fixPath(
@@ -58,7 +59,7 @@ export const resolveBaseDir = Effect.fn(function* (raw: string | undefined) {
         ? resolved.slice(0, -suffix.length)
         : dirname(resolved);
     }
-    return join(OS.homedir(), ".t3");
+    return join(OS.homedir(), APP_HIDDEN_DIR);
   }
   return resolve(yield* expandHomePath(raw.trim()));
 });

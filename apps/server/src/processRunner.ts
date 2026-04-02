@@ -1,6 +1,7 @@
 import { type ChildProcess as ChildProcessHandle, spawn, spawnSync } from "node:child_process";
 import { statSync } from "node:fs";
 import { extname, join } from "node:path";
+import { buildWslProcessCommand } from "./wsl";
 
 export interface ProcessRunOptions {
   cwd?: string | undefined;
@@ -214,10 +215,21 @@ export async function runProcess(
   const outputMode = options.outputMode ?? "error";
 
   return new Promise<ProcessRunResult>((resolve, reject) => {
-    const resolvedCommand = resolveCommandForPlatform(command, options.env);
-    const child = spawn(resolvedCommand, args, {
-      cwd: options.cwd,
-      env: options.env,
+    const wslCommand = options.cwd
+      ? buildWslProcessCommand({
+          command,
+          args,
+          cwd: options.cwd,
+          ...(options.env ? { env: options.env } : {}),
+        })
+      : null;
+    const resolvedCommand = resolveCommandForPlatform(
+      wslCommand?.command ?? command,
+      wslCommand?.env ?? options.env,
+    );
+    const child = spawn(resolvedCommand, wslCommand?.args ?? args, {
+      cwd: wslCommand?.cwd ?? options.cwd,
+      env: wslCommand?.env ?? options.env,
       stdio: "pipe",
     });
 

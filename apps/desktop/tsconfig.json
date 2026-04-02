@@ -2,8 +2,9 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
-    "types": ["node", "electron"],
-    "lib": ["ES2023", "DOM", "esnext.disposable"]
+    "types": ["node", "bun"],
+    "lib": ["ES2023", "DOM", "esnext.disposable"],
+    "skipLibCheck": true
   },
-  "include": ["src", "tsdown.config.ts"]
+  "include": ["src", "electrobun.config.ts"]
 }
