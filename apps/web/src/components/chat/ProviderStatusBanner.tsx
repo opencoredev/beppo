@@ -12,6 +12,12 @@ export const ProviderStatusBanner = memo(function ProviderStatusBanner({
     return null;
   }
 
+  // Don't show a scary error banner for providers that simply aren't installed
+  // (e.g. Codex CLI not on PATH). The provider picker already shows them as unavailable.
+  if (status.message?.includes("NotFound") || status.message?.includes("not installed")) {
+    return null;
+  }
+
   const providerLabel = PROVIDER_DISPLAY_NAMES[status.provider] ?? status.provider;
   const defaultMessage =
     status.status === "error"

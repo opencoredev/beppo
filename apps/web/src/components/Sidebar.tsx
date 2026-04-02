@@ -57,6 +57,7 @@ import {
 } from "@t3tools/contracts/settings";
 import { isElectron } from "../env";
 import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../branding";
+import beppoIcon from "../assets/icon.jpg";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isLinuxPlatform, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
 import { useStore } from "../store";
@@ -1954,7 +1955,8 @@ export default function Sidebar() {
       <Tooltip>
         <TooltipTrigger
           render={
-            <div className="flex min-w-0 flex-1 items-center gap-1 ml-1 cursor-pointer">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 ml-1 cursor-pointer">
+              <img src={beppoIcon} alt="Beppo" className="size-5 rounded-md" />
               <span className="truncate text-sm font-semibold tracking-tight text-foreground">
                 {APP_BASE_NAME}
               </span>
