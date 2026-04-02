@@ -288,15 +288,15 @@ export function createDevRunnerEnv({
       T3CODE_HOME: resolvedBaseDir,
     };
 
-    if (!isDesktopMode) {
-      output.T3CODE_PORT = String(serverPort);
-      output.VITE_WS_URL = `ws://localhost:${serverPort}`;
-    } else {
-      delete output.T3CODE_PORT;
-      delete output.VITE_WS_URL;
+    output.T3CODE_PORT = String(serverPort);
+    output.VITE_WS_URL = `ws://localhost:${serverPort}`;
+
+    if (isDesktopMode) {
+      // In desktop dev mode, the desktop app connects to the turbo-started
+      // server via VITE_WS_URL instead of spawning its own child backend.
+      // T3CODE_PORT and VITE_WS_URL are kept so useExternalDevBackend=true.
       delete output.T3CODE_AUTH_TOKEN;
       delete output.T3CODE_MODE;
-      delete output.T3CODE_NO_BROWSER;
       delete output.T3CODE_HOST;
     }
 
