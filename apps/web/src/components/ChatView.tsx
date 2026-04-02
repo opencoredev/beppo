@@ -329,6 +329,7 @@ const terminalContextIdListsEqual = (
 
 interface ChatViewProps {
   threadId: ThreadId;
+  draftSurface?: "global" | "project";
 }
 
 interface PendingPullRequestSetupRequest {

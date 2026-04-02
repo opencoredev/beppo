@@ -23,6 +23,8 @@ type ThreadToastData = {
   threadId?: ThreadId | null;
   tooltipStyle?: boolean;
   dismissAfterVisibleMs?: number;
+  copyText?: string;
+  copyLabel?: string;
 };
 
 const toastManager = Toast.createToastManager<ThreadToastData>();
@@ -434,10 +436,28 @@ function AnchoredToasts() {
   );
 }
 
+const TOAST_TEXT_MAX_LENGTH = 200;
+
+function normalizeErrorToastText(error: unknown, fallback: string): string {
+  if (typeof error === "string") return error || fallback;
+  if (error instanceof Error) return error.message || fallback;
+  if (error != null && typeof error === "object" && "message" in error && typeof (error as { message: unknown }).message === "string") {
+    return (error as { message: string }).message || fallback;
+  }
+  return fallback;
+}
+
+function shortenToastText(text: string, maxLength: number = TOAST_TEXT_MAX_LENGTH): string {
+  if (text.length <= maxLength) return text;
+  return text.slice(0, maxLength - 1) + "\u2026";
+}
+
 export {
   ToastProvider,
   type ToastPosition,
   toastManager,
   AnchoredToastProvider,
   anchoredToastManager,
+  normalizeErrorToastText,
+  shortenToastText,
 };

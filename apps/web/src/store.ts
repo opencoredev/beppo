@@ -1142,6 +1142,8 @@ export function setThreadBranch(
 // ── Zustand store ────────────────────────────────────────────────────
 
 interface AppStore extends AppState {
+  /** Alias for `bootstrapComplete` used by route components. */
+  threadsHydrated: boolean;
   syncServerReadModel: (readModel: OrchestrationReadModel) => void;
   applyOrchestrationEvent: (event: OrchestrationEvent) => void;
   applyOrchestrationEvents: (events: ReadonlyArray<OrchestrationEvent>) => void;
@@ -1149,8 +1151,11 @@ interface AppStore extends AppState {
   setThreadBranch: (threadId: ThreadId, branch: string | null, worktreePath: string | null) => void;
 }
 
-export const useStore = create<AppStore>((set) => ({
+export const useStore = create<AppStore>((set, get) => ({
   ...initialState,
+  get threadsHydrated() {
+    return get().bootstrapComplete;
+  },
   syncServerReadModel: (readModel) => set((state) => syncServerReadModel(state, readModel)),
   applyOrchestrationEvent: (event) => set((state) => applyOrchestrationEvent(state, event)),
   applyOrchestrationEvents: (events) => set((state) => applyOrchestrationEvents(state, events)),

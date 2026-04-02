@@ -14,6 +14,8 @@ import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
+import { Route as ChatNewRouteImport } from './routes/_chat.new'
+import { Route as ChatArchiveRouteImport } from './routes/_chat.archive'
 import { Route as ChatThreadIdRouteImport } from './routes/_chat.$threadId'
 
 const SettingsRoute = SettingsRouteImport.update({
@@ -40,6 +42,16 @@ const SettingsArchivedRoute = SettingsArchivedRouteImport.update({
   path: '/archived',
   getParentRoute: () => SettingsRoute,
 } as any)
+const ChatNewRoute = ChatNewRouteImport.update({
+  id: '/new',
+  path: '/new',
+  getParentRoute: () => ChatRoute,
+} as any)
+const ChatArchiveRoute = ChatArchiveRouteImport.update({
+  id: '/archive',
+  path: '/archive',
+  getParentRoute: () => ChatRoute,
+} as any)
 const ChatThreadIdRoute = ChatThreadIdRouteImport.update({
   id: '/$threadId',
   path: '/$threadId',
@@ -50,12 +62,16 @@ export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
   '/settings': typeof SettingsRouteWithChildren
   '/$threadId': typeof ChatThreadIdRoute
+  '/archive': typeof ChatArchiveRoute
+  '/new': typeof ChatNewRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/general': typeof SettingsGeneralRoute
 }
 export interface FileRoutesByTo {
   '/settings': typeof SettingsRouteWithChildren
   '/$threadId': typeof ChatThreadIdRoute
+  '/archive': typeof ChatArchiveRoute
+  '/new': typeof ChatNewRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/': typeof ChatIndexRoute
@@ -65,6 +81,8 @@ export interface FileRoutesById {
   '/_chat': typeof ChatRouteWithChildren
   '/settings': typeof SettingsRouteWithChildren
   '/_chat/$threadId': typeof ChatThreadIdRoute
+  '/_chat/archive': typeof ChatArchiveRoute
+  '/_chat/new': typeof ChatNewRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/_chat/': typeof ChatIndexRoute
@@ -75,12 +93,16 @@ export interface FileRouteTypes {
     | '/'
     | '/settings'
     | '/$threadId'
+    | '/archive'
+    | '/new'
     | '/settings/archived'
     | '/settings/general'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/settings'
     | '/$threadId'
+    | '/archive'
+    | '/new'
     | '/settings/archived'
     | '/settings/general'
     | '/'
@@ -89,6 +111,8 @@ export interface FileRouteTypes {
     | '/_chat'
     | '/settings'
     | '/_chat/$threadId'
+    | '/_chat/archive'
+    | '/_chat/new'
     | '/settings/archived'
     | '/settings/general'
     | '/_chat/'
@@ -136,6 +160,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsArchivedRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/_chat/new': {
+      id: '/_chat/new'
+      path: '/new'
+      fullPath: '/new'
+      preLoaderRoute: typeof ChatNewRouteImport
+      parentRoute: typeof ChatRoute
+    }
+    '/_chat/archive': {
+      id: '/_chat/archive'
+      path: '/archive'
+      fullPath: '/archive'
+      preLoaderRoute: typeof ChatArchiveRouteImport
+      parentRoute: typeof ChatRoute
+    }
     '/_chat/$threadId': {
       id: '/_chat/$threadId'
       path: '/$threadId'
@@ -148,11 +186,15 @@ declare module '@tanstack/react-router' {
 
 interface ChatRouteChildren {
   ChatThreadIdRoute: typeof ChatThreadIdRoute
+  ChatArchiveRoute: typeof ChatArchiveRoute
+  ChatNewRoute: typeof ChatNewRoute
   ChatIndexRoute: typeof ChatIndexRoute
 }
 
 const ChatRouteChildren: ChatRouteChildren = {
   ChatThreadIdRoute: ChatThreadIdRoute,
+  ChatArchiveRoute: ChatArchiveRoute,
+  ChatNewRoute: ChatNewRoute,
   ChatIndexRoute: ChatIndexRoute,
 }
 
