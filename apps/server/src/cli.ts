@@ -12,8 +12,13 @@ import {
   type ServerConfigShape,
 } from "./config";
 import { readBootstrapEnvelope } from "./bootstrap";
-import { resolveBaseDir } from "./os-jank";
+import { fixPath, resolveBaseDir } from "./os-jank";
 import { runServer } from "./server";
+
+// Fix PATH early so terminal shells and child processes can be found.
+// On macOS/Linux, the PATH from a GUI-launched process (e.g. Electrobun)
+// is often minimal (/usr/bin:/bin) and doesn't include /opt/homebrew/bin, etc.
+fixPath();
 
 const PortSchema = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }));
 
