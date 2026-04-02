@@ -340,6 +340,7 @@ export function createDevRunnerEnv({
 
     if (isDesktopMode) {
       output.T3CODE_NO_BROWSER = "1";
+      output.T3CODE_REPO_ROOT = process.cwd();
       delete output.T3CODE_DESKTOP_WS_URL;
     }
 

@@ -87,6 +87,9 @@ const BASE_DIR = resolveBaseDirectory();
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const ROOT_DIR = Path.resolve(import.meta.dir, "..");
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
+// In electrobun dev mode, import.meta.dir resolves inside the .app bundle, not the repo.
+// The dev-runner passes T3CODE_REPO_ROOT so we can locate source files for the backend.
+const REPO_ROOT_DIR = process.env.T3CODE_REPO_ROOT || ROOT_DIR;
 const externalDevBackendWsUrl = process.env.VITE_WS_URL?.trim() || "";
 const useExternalDevBackend = isDevelopment && externalDevBackendWsUrl.length > 0;
 const APP_DISPLAY_NAME = isDevelopment ? "Beppo (Dev)" : desktopPackageJson.productName ?? "Beppo";
@@ -269,7 +272,12 @@ function captureBackendOutput(child: ChildProcess.ChildProcess): void {
 }
 
 function resolveBackendEntry(): string {
-  return Path.join(ROOT_DIR, "apps/server/dist/index.mjs");
+  if (isDevelopment) {
+    // In dev mode, run from source via bun (repo root, not .app bundle)
+    return Path.join(REPO_ROOT_DIR, "apps/server/src/bin.ts");
+  }
+  // In production, the server dist is copied into the .app bundle
+  return Path.join(ROOT_DIR, "apps/server/dist/bin.mjs");
 }
 
 function resolveWindowUrl(): string {
@@ -653,7 +661,7 @@ function startBackend(): void {
   }
 
   const child = ChildProcess.spawn(process.execPath, [backendEntry], {
-    cwd: isDevelopment ? Path.resolve(ROOT_DIR, "../..") : OS.homedir(),
+    cwd: isDevelopment ? REPO_ROOT_DIR : OS.homedir(),
     env: backendEnv(),
     stdio: backendLogSink ? ["ignore", "pipe", "pipe"] : "inherit",
   });
