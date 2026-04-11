@@ -67,6 +67,9 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+o", command: "editor.openFavorite" },
   { key: "mod+shift+[", command: "thread.previous" },
   { key: "mod+shift+]", command: "thread.next" },
+  { key: "mod+k", command: "palette.open", when: "!terminalFocus" },
+  { key: "mod+shift+p", command: "agent.pause" },
+  { key: "mod+shift+s", command: "agent.stop" },
   ...THREAD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
     key: `mod+${index + 1}`,
     command,
@@ -718,17 +721,31 @@ const makeKeybindings = Effect.gen(function* () {
 
       const runtimeConfig = yield* loadRuntimeCustomKeybindingsConfig();
       if (runtimeConfig.issues.length > 0) {
-        yield* Effect.logWarning(
-          "skipping startup keybindings default sync because config has issues",
-          {
-            path: keybindingsConfigPath,
-            issues: runtimeConfig.issues,
-          },
+        const hasOnlyInvalidEntries = runtimeConfig.issues.every(
+          (issue) => issue.kind === "keybindings.invalid-entry",
         );
-        yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
-        return;
+
+        if (!hasOnlyInvalidEntries) {
+          yield* Effect.logWarning(
+            "skipping startup keybindings default sync because config has issues",
+            {
+              path: keybindingsConfigPath,
+              issues: runtimeConfig.issues,
+            },
+          );
+          yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
+          return;
+        }
+
+        yield* Effect.logWarning("sanitizing invalid keybinding entries on startup", {
+          path: keybindingsConfigPath,
+          issues: runtimeConfig.issues,
+        });
       }
-      const customConfig = runtimeConfig.keybindings;
+      const customConfig =
+        runtimeConfig.issues.length > 0
+          ? yield* loadWritableCustomKeybindingsConfig()
+          : runtimeConfig.keybindings;
       const existingCommands = new Set(customConfig.map((entry) => entry.command));
       const missingDefaults: KeybindingRule[] = [];
       const shortcutConflictWarnings: Array<{

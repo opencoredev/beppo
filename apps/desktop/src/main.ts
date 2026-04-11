@@ -44,7 +44,7 @@ import {
   reduceDesktopUpdateStateOnNoUpdate,
   reduceDesktopUpdateStateOnUpdateAvailable,
 } from "./updateMachine";
-import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
+import { resolveDesktopRuntimeInfo } from "./runtimeArch";
 
 fixPath();
 
@@ -809,11 +809,15 @@ async function handleBridgeRequest(envelope: DesktopBridgeRequestEnvelope): Prom
             : OS.homedir(),
         canChooseFiles: false,
         canChooseDirectory: true,
+        canChooseDirectories: true,
         allowsMultipleSelection: false,
       });
-      const selected = Array.isArray(result)
-        ? result.find((entry: unknown) => typeof entry === "string" && entry.trim().length > 0)
-        : null;
+      const selected =
+        typeof result === "string" && result.trim().length > 0
+          ? result
+          : Array.isArray(result)
+            ? result.find((entry: unknown) => typeof entry === "string" && entry.trim().length > 0)
+            : null;
       writeDesktopLog(
         `bridge pickFolder result=${typeof selected === "string" ? selected : "<empty>"}`,
       );
@@ -892,15 +896,31 @@ async function handleBridgeRequest(envelope: DesktopBridgeRequestEnvelope): Prom
 }
 
 function configureApplicationMenu(): void {
+  const fileMenu = {
+    label: "File",
+    submenu: [
+      { label: "Settings...", action: "open-settings", accelerator: "CmdOrCtrl+," },
+      { type: "separator" },
+      ...(process.platform === "darwin"
+        ? [{ role: "close" }]
+        : [{ label: "Quit", action: "quit-app", accelerator: "CmdOrCtrl+Q" }]),
+    ],
+  };
+
   ApplicationMenu.setApplicationMenu([
-    {
-      label: "File",
-      submenu: [
-        { label: "Settings...", action: "open-settings", accelerator: "CmdOrCtrl+," },
-        { type: "separator" },
-        { role: process.platform === "darwin" ? "close" : "quit" },
-      ],
-    },
+    ...(process.platform === "darwin"
+      ? [
+          {
+            label: APP_DISPLAY_NAME,
+            submenu: [
+              { label: `About ${APP_DISPLAY_NAME}`, role: "about" },
+              { type: "separator" },
+              { label: "Quit", action: "quit-app", accelerator: "CmdOrCtrl+Q" },
+            ],
+          },
+        ]
+      : []),
+    fileMenu,
     { role: "editMenu" },
     { role: "viewMenu" },
     { role: "windowMenu" },
@@ -919,6 +939,11 @@ function configureApplicationMenu(): void {
       return;
     }
 
+    if (action === "quit-app") {
+      await requestApplicationQuit();
+      return;
+    }
+
     if (action.length > 0) {
       broadcastBridgeEvent(MENU_ACTION_EVENT, action);
       if (mainWindow) {
@@ -926,6 +951,22 @@ function configureApplicationMenu(): void {
       }
     }
   });
+}
+
+async function requestApplicationQuit(): Promise<void> {
+  if (isQuitting) {
+    return;
+  }
+
+  const confirmed = await showDesktopConfirmDialog(`Quit ${APP_DISPLAY_NAME} now?`);
+  if (!confirmed) {
+    return;
+  }
+
+  isQuitting = true;
+  clearUpdateTimers();
+  stopBackend();
+  Utils.quit();
 }
 
 function configureContextMenuListener(): void {
@@ -972,7 +1013,13 @@ function createWindow(): DesktopWindow {
   // when started from a terminal, so explicitly show/focus the first window.
   window.show();
   window.focus();
-  activateMacAppBundle();
+  // In dev mode, skip activateMacAppBundle — calling `open -b <bundle-id>` when the
+  // dev-built .app bundle exists on disk causes macOS to spawn a second app instance,
+  // resulting in two Beppo windows. The window.show()/focus() above is sufficient for
+  // dev-mode visibility. In production the app is launched by the OS normally.
+  if (!isDevelopment) {
+    activateMacAppBundle();
+  }
 
   window.webview.on("dom-ready", () => {
     writeDesktopLog(`window dom-ready id=${window.id}`);

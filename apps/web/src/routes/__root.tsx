@@ -1,4 +1,4 @@
-import { CheckIcon, CircleAlertIcon, CopyIcon, TerminalIcon } from "lucide-react";
+import { CheckIcon, CircleAlertIcon, CopyIcon } from "lucide-react";
 import {
   OrchestrationEvent,
   ThreadId,
@@ -15,8 +15,10 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 import { Throttler } from "@tanstack/react-pacer";
 
-import { APP_DISPLAY_NAME, APP_STAGE_LABEL, IS_DEV_STAGE } from "../branding";
+import { APP_DISPLAY_NAME } from "../branding";
+import { AppCommandPalette } from "../components/AppCommandPalette";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
+import { NotificationCoordinator } from "../components/NotificationCoordinator";
 import { Button } from "../components/ui/button";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../components/ui/alert";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
@@ -57,7 +59,7 @@ export const Route = createRootRouteWithContext<{
   }),
 });
 
-function RootRouteShell({ children }: { children: React.ReactNode }) {
+function RootRouteShell() {
   useEffect(() => {
     if (typeof document === "undefined") return;
     const existingLink = document.querySelector("link[rel='icon']") as HTMLLinkElement | null;
@@ -98,11 +100,12 @@ function RootRouteShell({ children }: { children: React.ReactNode }) {
       <ToastProvider>
         <AnchoredToastProvider>
           <EventRouter />
+          <NotificationCoordinator />
+          <AppCommandPalette />
           <DesktopProjectBootstrap />
           <AppSidebarLayout>
             <Outlet />
           </AppSidebarLayout>
-          <AppStageBadge />
         </AnchoredToastProvider>
       </ToastProvider>
     </>
@@ -111,23 +114,6 @@ function RootRouteShell({ children }: { children: React.ReactNode }) {
 
 function RootRouteView() {
   return <Outlet />;
-}
-
-function AppStageBadge() {
-  if (!IS_DEV_STAGE) {
-    return null;
-  }
-
-  return (
-    <div className="pointer-events-none fixed right-0 bottom-0 z-40">
-      <div className="flex h-9 items-center gap-2 border-t border-l border-border bg-[color-mix(in_srgb,var(--color-card)_88%,var(--color-foreground)_12%)] pr-3 pl-4 shadow-[-1px_-1px_0_color-mix(in_srgb,var(--color-foreground)_14%,transparent)] [clip-path:polygon(12px_0,100%_0,100%_100%,0_100%,0_12px)]">
-        <TerminalIcon className="size-3.5 text-foreground/75" />
-        <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-foreground">
-          {APP_STAGE_LABEL}
-        </span>
-      </div>
-    </div>
-  );
 }
 
 function RootRouteErrorView({ error, reset }: ErrorComponentProps) {

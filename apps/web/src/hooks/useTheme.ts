@@ -10,7 +10,6 @@ type ThemeSnapshot = {
 const STORAGE_KEY = `${APP_STORAGE_PREFIX}:theme`;
 const LEGACY_STORAGE_KEY = `${LEGACY_APP_STORAGE_PREFIX}:theme`;
 const MEDIA_QUERY = "(prefers-color-scheme: dark)";
-
 let listeners: Array<() => void> = [];
 let lastSnapshot: ThemeSnapshot | null = null;
 let lastDesktopTheme: Theme | null = null;
@@ -39,6 +38,7 @@ function applyTheme(theme: Theme, suppressTransitions = false) {
   const isDark = theme === "dark" || (theme === "system" && getSystemDark());
   document.documentElement.classList.toggle("dark", isDark);
   syncDesktopTheme(theme);
+
   if (suppressTransitions) {
     // Force a reflow so the no-transitions class takes effect before removal
     // oxlint-disable-next-line no-unused-expressions

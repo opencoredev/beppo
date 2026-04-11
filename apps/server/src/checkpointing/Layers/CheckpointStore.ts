@@ -245,6 +245,8 @@ const makeCheckpointStore = Effect.gen(function* () {
         operation,
         cwd: input.cwd,
         args: ["diff", "--patch", "--minimal", "--no-color", fromCommitOid, toCommitOid],
+        maxOutputBytes: 5_000_000,
+        truncateOutputAtMaxBytes: true,
       });
 
       return result.stdout;

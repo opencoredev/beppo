@@ -471,6 +471,40 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 
+  it.effect("sanitizes invalid keybinding entries on startup and persists the cleaned config", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      yield* fileSystem.makeDirectory(path.dirname(keybindingsConfigPath), { recursive: true });
+      yield* fileSystem.writeFileString(
+        keybindingsConfigPath,
+        JSON.stringify(
+          [
+            { key: "mod+j", command: "terminal.toggle" },
+            { key: "mod+shift+1", command: "view.chat" },
+            { key: "mod+k", command: "palette.open", when: "!terminalFocus" },
+          ],
+          null,
+          2,
+        ),
+      );
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.isFalse(persisted.some((entry) => String(entry.command) === "view.chat"));
+      assert.isTrue(persisted.some((entry) => entry.command === "terminal.toggle"));
+      assert.isTrue(persisted.some((entry) => entry.command === "palette.open"));
+      for (const defaultRule of DEFAULT_KEYBINDINGS) {
+        assert.isTrue(persisted.some((entry) => entry.command === defaultRule.command));
+      }
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
   it.effect("serializes concurrent upserts to avoid lost updates", () =>
     Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig;

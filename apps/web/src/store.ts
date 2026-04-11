@@ -214,6 +214,8 @@ function buildSidebarThreadSummary(thread: Thread): SidebarThreadSummary {
     id: thread.id,
     projectId: thread.projectId,
     title: thread.title,
+    modelProvider: thread.modelSelection.provider,
+    modelName: thread.modelSelection.model,
     interactionMode: thread.interactionMode,
     session: thread.session,
     createdAt: thread.createdAt,
@@ -240,6 +242,8 @@ function sidebarThreadSummariesEqual(
     left.id === right.id &&
     left.projectId === right.projectId &&
     left.title === right.title &&
+    left.modelProvider === right.modelProvider &&
+    left.modelName === right.modelName &&
     left.interactionMode === right.interactionMode &&
     left.session === right.session &&
     left.createdAt === right.createdAt &&

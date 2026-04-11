@@ -12,6 +12,32 @@
 
 Beppo is an early-stage interface for running coding agents with a UI that stays responsive, predictable, and robust under real session load. The current stack centers on Codex App Server, with the browser UI and desktop shell both built from the same monorepo.
 
+## Feature Highlights
+
+- Chat-first thread management with faster project and session navigation
+- Multi-provider model picking with first-class provider identity across the UI
+- Pinned threads for quickly resurfacing important sessions
+- Global command palette for fast navigation, theme switching, and agent controls
+- Plan sidebar with copy, download, and save-to-workspace actions
+- Pull request checkout flow for turning a PR into a local or worktree-backed thread
+- Thread terminal drawer with split terminals and multi-terminal management
+- Smart notifications for completions, errors, and input-needed moments
+- Context window and rate-limit visibility while an agent is running
+- Smoother day-to-day developer UX around sidebar, threads, and session controls
+
+## Inspiration
+
+Some of Beppo's session-management and sidebar polish was inspired by [dpcode](https://github.com/Emanuele-web04/dpcode), especially the ideas around:
+
+- pinned threads
+- provider logos and identity cues
+- command palette driven navigation
+- notification ergonomics
+- plan-centric side surfaces
+- richer session chrome around agent workflows
+
+These features were not copied 1:1 on purpose. Beppo adapts them to fit its own architecture, existing terminal and diff flows, and its own product direction.
+
 ## Current Status
 
 - Very early work in progress
@@ -52,9 +78,10 @@ bun dev:desktop
 
 ## Quality Checks
 
-Before considering work complete in this repo, both of these must pass:
+Before considering work complete in this repo, all of these must pass:
 
 ```bash
+bun fmt
 bun lint
 bun typecheck
 ```

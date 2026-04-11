@@ -115,6 +115,8 @@ export interface SidebarThreadSummary {
   id: ThreadId;
   projectId: ProjectId;
   title: string;
+  modelProvider: ProviderKind;
+  modelName: string;
   interactionMode: ProviderInteractionMode;
   session: ThreadSession | null;
   createdAt: string;

@@ -4,7 +4,10 @@ import {
   ChevronRightIcon,
   FolderIcon,
   GitPullRequestIcon,
+  MessageSquareIcon,
+  PinIcon,
   PlusIcon,
+  SearchIcon,
   SettingsIcon,
   SquarePenIcon,
   TerminalIcon,
@@ -59,7 +62,7 @@ import { isElectron } from "../env";
 import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import beppoIcon from "../assets/icon.jpg";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { isLinuxPlatform, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
+import { isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
 import { useStore } from "../store";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
@@ -132,6 +135,11 @@ import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "../rpc/serverState";
 import { useSidebarThreadSummaryById } from "../storeSelectors";
 import type { Project } from "../types";
+import { ProviderIdentityIcon } from "./ProviderIdentityIcon";
+import { usePinnedThreadsStore } from "~/pinnedThreadsStore";
+import { ThreadPinToggleButton } from "./ThreadPinToggleButton";
+import { useCommandPalette } from "~/commandPalette/useCommandPalette";
+import { createCommand } from "~/commandPalette/commandRegistry";
 const THREAD_PREVIEW_LIMIT = 6;
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
@@ -279,6 +287,7 @@ interface SidebarThreadRowProps {
   attemptArchiveThread: (threadId: ThreadId) => Promise<void>;
   openPrLink: (event: MouseEvent<HTMLElement>, prUrl: string) => void;
   pr: ThreadPr | null;
+  pinned?: boolean;
 }
 
 function SidebarThreadRow(props: SidebarThreadRowProps) {
@@ -385,6 +394,11 @@ function SidebarThreadRow(props: SidebarThreadRowProps) {
               <TooltipPopup side="top">{prStatus.tooltip}</TooltipPopup>
             </Tooltip>
           )}
+          <ProviderIdentityIcon
+            provider={thread.modelProvider}
+            className="size-3 shrink-0 text-muted-foreground/68"
+            title={thread.modelProvider === "claudeAgent" ? "Claude thread" : "Codex thread"}
+          />
           {threadStatus && <ThreadStatusLabel status={threadStatus} />}
           {props.renamingThreadId === thread.id ? (
             <input
@@ -433,6 +447,15 @@ function SidebarThreadRow(props: SidebarThreadRowProps) {
             </span>
           )}
           <div className="flex min-w-12 justify-end">
+            <div
+              className={`pointer-events-none absolute top-1/2 right-7 -translate-y-1/2 transition-opacity duration-150 ${
+                props.pinned
+                  ? "pointer-events-auto opacity-100"
+                  : "group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100 opacity-0"
+              }`}
+            >
+              <ThreadPinToggleButton threadId={thread.id} label={thread.title} />
+            </div>
             {isConfirmingArchive ? (
               <button
                 ref={(element) => {
@@ -672,6 +695,10 @@ export default function Sidebar() {
   const clearProjectDraftThreadId = useComposerDraftStore(
     (store) => store.clearProjectDraftThreadId,
   );
+  const registerCommands = useCommandPalette((state) => state.registerCommands);
+  const openCommandPalette = useCommandPalette((state) => state.open);
+  const pinnedThreadIds = usePinnedThreadsStore((state) => state.pinnedThreadIds);
+  const syncPinnedThreadIds = usePinnedThreadsStore((state) => state.syncThreadIds);
   const navigate = useNavigate();
   const pathname = useLocation({ select: (loc) => loc.pathname });
   const isOnSettings = pathname.startsWith("/settings");
@@ -684,6 +711,10 @@ export default function Sidebar() {
     select: (params) => (params.threadId ? ThreadId.makeUnsafe(params.threadId) : null),
   });
   const keybindings = useServerKeybindings();
+  const paletteShortcutLabel = useMemo(
+    () => shortcutLabelForCommand(keybindings, "palette.open"),
+    [keybindings],
+  );
   const [addingProject, setAddingProject] = useState(false);
   const [newCwd, setNewCwd] = useState("");
   const [isPickingFolder, setIsPickingFolder] = useState(false);
@@ -710,10 +741,8 @@ export default function Sidebar() {
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const removeFromSelection = useThreadSelectionStore((s) => s.removeFromSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
-  const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
   const platform = navigator.platform;
-  const shouldBrowseForProjectImmediately = isElectron && !isLinuxDesktop;
-  const shouldShowProjectPathEntry = addingProject && !shouldBrowseForProjectImmediately;
+  const shouldShowProjectPathEntry = addingProject;
   const orderedProjects = useMemo(() => {
     return orderItemsByPreferredIds({
       items: projects,
@@ -896,15 +925,7 @@ export default function Sidebar() {
         const description =
           error instanceof Error ? error.message : "An error occurred while adding the project.";
         setIsAddingProject(false);
-        if (shouldBrowseForProjectImmediately) {
-          toastManager.add({
-            type: "error",
-            title: "Failed to add project",
-            description,
-          });
-        } else {
-          setAddProjectError(description);
-        }
+        setAddProjectError(description);
         return;
       }
       finishAddingProject();
@@ -914,7 +935,6 @@ export default function Sidebar() {
       handleNewThread,
       isAddingProject,
       projects,
-      shouldBrowseForProjectImmediately,
       appSettings.defaultThreadEnvMode,
     ],
   );
@@ -937,7 +957,7 @@ export default function Sidebar() {
     }
     if (pickedPath) {
       await addProjectFromPath(pickedPath);
-    } else if (!shouldBrowseForProjectImmediately) {
+    } else {
       addProjectInputRef.current?.focus();
     }
     setIsPickingFolder(false);
@@ -945,10 +965,6 @@ export default function Sidebar() {
 
   const handleStartAddProject = () => {
     setAddProjectError(null);
-    if (shouldBrowseForProjectImmediately) {
-      void handlePickFolder();
-      return;
-    }
     setAddingProject((prev) => !prev);
   };
 
@@ -1368,6 +1384,15 @@ export default function Sidebar() {
     () => sidebarThreads.filter((thread) => thread.archivedAt === null),
     [sidebarThreads],
   );
+  const pinnedThreads = useMemo(
+    () =>
+      orderItemsByPreferredIds({
+        items: visibleThreads.filter((thread) => pinnedThreadIds.includes(thread.id)),
+        preferredIds: pinnedThreadIds,
+        getId: (thread) => thread.id,
+      }),
+    [pinnedThreadIds, visibleThreads],
+  );
   const sortedProjects = useMemo(
     () =>
       sortProjectsForSidebar(sidebarProjects, visibleThreads, appSettings.sidebarProjectSortOrder),
@@ -1473,6 +1498,70 @@ export default function Sidebar() {
     return mapping;
   }, [keybindings, sidebarShortcutLabelOptions, threadJumpCommandById]);
   const orderedSidebarThreadIds = visibleSidebarThreadIds;
+
+  useEffect(() => {
+    syncPinnedThreadIds(visibleThreads.map((thread) => thread.id));
+  }, [syncPinnedThreadIds, visibleThreads]);
+
+  useEffect(() => {
+    const projectNameById = new Map(projects.map((project) => [project.id, project.name] as const));
+    const commands = [
+      ...pinnedThreads.map((thread) =>
+        createCommand({
+          id: `thread.pinned.${thread.id}`,
+          label: `Open ${thread.title}`,
+          group: "Pinned Threads",
+          icon: PinIcon,
+          keywords: [projectNameById.get(thread.projectId) ?? "", thread.modelName],
+          execute: () => navigateToThread(thread.id),
+        }),
+      ),
+      ...visibleThreads.map((thread) =>
+        createCommand({
+          id: `thread.open.${thread.id}`,
+          label: thread.title,
+          group: "Threads",
+          icon: MessageSquareIcon,
+          keywords: [projectNameById.get(thread.projectId) ?? "", thread.modelName],
+          execute: () => navigateToThread(thread.id),
+        }),
+      ),
+      ...projects.map((project) =>
+        createCommand({
+          id: `project.new-thread.${project.id}`,
+          label: `New thread in ${project.name}`,
+          group: "Projects",
+          keywords: [project.cwd],
+          execute: () => {
+            void handleNewThread(project.id, {
+              envMode: resolveSidebarNewThreadEnvMode({
+                defaultEnvMode: appSettings.defaultThreadEnvMode,
+              }),
+            });
+          },
+        }),
+      ),
+      createCommand({
+        id: "sidebar.settings",
+        label: "Open Settings",
+        group: "Navigation",
+        icon: SettingsIcon,
+        keywords: ["preferences", "config"],
+        execute: () => void navigate({ to: "/settings/general" }),
+      }),
+    ];
+
+    return registerCommands(commands);
+  }, [
+    appSettings.defaultThreadEnvMode,
+    handleNewThread,
+    navigate,
+    navigateToThread,
+    pinnedThreads,
+    projects,
+    registerCommands,
+    visibleThreads,
+  ]);
 
   useEffect(() => {
     const getShortcutContext = () => ({
@@ -1727,6 +1816,7 @@ export default function Sidebar() {
                 attemptArchiveThread={attemptArchiveThread}
                 openPrLink={openPrLink}
                 pr={prByThreadId.get(threadId) ?? null}
+                pinned={pinnedThreadIds.includes(threadId)}
               />
             ))}
 
@@ -1950,12 +2040,12 @@ export default function Sidebar() {
   }, []);
 
   const wordmark = (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 items-center gap-2">
       <SidebarTrigger className="shrink-0 md:hidden" />
       <Tooltip>
         <TooltipTrigger
           render={
-            <div className="flex min-w-0 flex-1 items-center gap-1.5 ml-1 cursor-pointer">
+            <div className="ml-1 flex min-w-0 flex-1 items-center gap-1.5 cursor-pointer">
               <img src={beppoIcon} alt="Beppo" className="size-5 rounded-md" />
               <span className="truncate text-sm font-semibold tracking-tight text-foreground">
                 {APP_BASE_NAME}
@@ -1976,12 +2066,44 @@ export default function Sidebar() {
   return (
     <>
       {isElectron ? (
-        <SidebarHeader className="drag-region h-[52px] flex-row items-center gap-2 px-4 py-0 pl-[90px]">
-          {wordmark}
+        <SidebarHeader className="gap-2 px-3 pb-2 pt-0 sm:px-4">
+          <div className="drag-region flex h-[52px] items-center pl-[90px]">{wordmark}</div>
+          <button
+            type="button"
+            aria-label="Open command palette"
+            className="inline-flex h-9 w-full items-center justify-between rounded-xl border border-border/70 bg-background/70 px-3 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            onClick={openCommandPalette}
+          >
+            <span className="inline-flex min-w-0 items-center gap-2">
+              <SearchIcon className="size-3.5 shrink-0" />
+              <span className="truncate">Search threads, projects, and actions</span>
+            </span>
+            {paletteShortcutLabel ? (
+              <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground/76">
+                {paletteShortcutLabel}
+              </span>
+            ) : null}
+          </button>
         </SidebarHeader>
       ) : (
-        <SidebarHeader className="gap-3 px-3 py-2 sm:gap-2.5 sm:px-4 sm:py-3">
+        <SidebarHeader className="gap-2 px-3 py-2 sm:px-4 sm:py-3">
           {wordmark}
+          <button
+            type="button"
+            aria-label="Open command palette"
+            className="inline-flex h-9 w-full items-center justify-between rounded-xl border border-border/70 bg-background/70 px-3 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            onClick={openCommandPalette}
+          >
+            <span className="inline-flex min-w-0 items-center gap-2">
+              <SearchIcon className="size-3.5 shrink-0" />
+              <span className="truncate">Search threads, projects, and actions</span>
+            </span>
+            {paletteShortcutLabel ? (
+              <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground/76">
+                {paletteShortcutLabel}
+              </span>
+            ) : null}
+          </button>
         </SidebarHeader>
       )}
 
@@ -2011,6 +2133,49 @@ export default function Sidebar() {
                     </AlertAction>
                   ) : null}
                 </Alert>
+              </SidebarGroup>
+            ) : null}
+            {pinnedThreads.length > 0 ? (
+              <SidebarGroup className="px-2 pt-2 pb-0">
+                <div className="mb-1 flex items-center gap-2 pl-2 pr-1.5">
+                  <PinIcon className="size-3.5 text-primary" />
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+                    Pinned
+                  </span>
+                </div>
+                <SidebarMenu ref={attachThreadListAutoAnimateRef}>
+                  {pinnedThreads.map((thread) => (
+                    <SidebarThreadRow
+                      key={`pinned-${thread.id}`}
+                      threadId={thread.id}
+                      orderedProjectThreadIds={[thread.id]}
+                      routeThreadId={routeThreadId}
+                      selectedThreadIds={selectedThreadIds}
+                      showThreadJumpHints={showThreadJumpHints}
+                      jumpLabel={threadJumpLabelById.get(thread.id) ?? null}
+                      appSettingsConfirmThreadArchive={appSettings.confirmThreadArchive}
+                      renamingThreadId={renamingThreadId}
+                      renamingTitle={renamingTitle}
+                      setRenamingTitle={setRenamingTitle}
+                      renamingInputRef={renamingInputRef}
+                      renamingCommittedRef={renamingCommittedRef}
+                      confirmingArchiveThreadId={confirmingArchiveThreadId}
+                      setConfirmingArchiveThreadId={setConfirmingArchiveThreadId}
+                      confirmArchiveButtonRefs={confirmArchiveButtonRefs}
+                      handleThreadClick={handleThreadClick}
+                      navigateToThread={navigateToThread}
+                      handleMultiSelectContextMenu={handleMultiSelectContextMenu}
+                      handleThreadContextMenu={handleThreadContextMenu}
+                      clearSelection={clearSelection}
+                      commitRename={commitRename}
+                      cancelRename={cancelRename}
+                      attemptArchiveThread={attemptArchiveThread}
+                      openPrLink={openPrLink}
+                      pr={prByThreadId.get(thread.id) ?? null}
+                      pinned
+                    />
+                  ))}
+                </SidebarMenu>
               </SidebarGroup>
             ) : null}
             <SidebarGroup className="px-2 py-2">

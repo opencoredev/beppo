@@ -156,6 +156,7 @@ import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
+import { RateLimitsPanel } from "./RateLimitsPanel";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { AVAILABLE_PROVIDER_OPTIONS, ProviderModelPicker } from "./chat/ProviderModelPicker";
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
@@ -792,11 +793,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const threadProvider =
     activeThread?.modelSelection.provider ?? activeProject?.defaultModelSelection?.provider ?? null;
   const hasThreadStarted = threadHasStarted(activeThread);
-  const lockedProvider: ProviderKind | null = hasThreadStarted
-    ? (sessionProvider ?? threadProvider ?? selectedProviderByThreadId ?? null)
-    : null;
   const serverConfig = useServerConfig();
   const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS;
+  const threadLockedProvider = hasThreadStarted
+    ? (sessionProvider ?? threadProvider ?? selectedProviderByThreadId ?? null)
+    : null;
+  const lockedProviderStatus =
+    threadLockedProvider !== null
+      ? (providerStatuses.find((status) => status.provider === threadLockedProvider) ?? null)
+      : null;
+  const lockedProvider: ProviderKind | null =
+    threadLockedProvider !== null &&
+    (lockedProviderStatus === null || lockedProviderStatus.status === "ready")
+      ? threadLockedProvider
+      : null;
   const unlockedSelectedProvider = resolveSelectableProvider(
     providerStatuses,
     selectedProviderByThreadId ?? threadProvider ?? "codex",
@@ -2889,12 +2899,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
 
       if (isServerThread) {
-        await persistThreadSettingsForNextTurn({
+        void persistThreadSettingsForNextTurn({
           threadId: threadIdForSend,
           createdAt: messageCreatedAt,
           ...(selectedModel ? { modelSelection: selectedModelSelection } : {}),
           runtimeMode,
           interactionMode,
+        }).catch((error) => {
+          console.warn("Failed to persist thread settings before turn start", error);
         });
       }
 
@@ -3170,12 +3182,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
       forceStickToBottom();
 
       try {
-        await persistThreadSettingsForNextTurn({
+        void persistThreadSettingsForNextTurn({
           threadId: threadIdForSend,
           createdAt: messageCreatedAt,
           modelSelection: selectedModelSelection,
           runtimeMode,
           interactionMode: nextInteractionMode,
+        }).catch((error) => {
+          console.warn("Failed to persist thread settings before plan follow-up", error);
         });
 
         // Keep the mode toggle and plan-follow-up banner in sync immediately
@@ -3762,6 +3776,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         <ChatHeader
           activeThreadId={activeThread.id}
           activeThreadTitle={activeThread.title}
+          activeThreadProvider={activeThread.modelSelection.provider}
           activeProjectName={activeProject?.name}
           isGitRepo={isGitRepo}
           openInCwd={gitCwd}
@@ -4197,6 +4212,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         {activeContextWindow ? (
                           <ContextWindowMeter usage={activeContextWindow} />
                         ) : null}
+                        <RateLimitsPanel activities={threadActivities} />
                         {isPreparingWorktree ? (
                           <span className="text-muted-foreground/70 text-xs">
                             Preparing worktree...

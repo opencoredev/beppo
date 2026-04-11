@@ -36,15 +36,26 @@ export function isProviderEnabled(
   return getProviderSnapshot(providers, provider)?.enabled ?? true;
 }
 
+export function isProviderReady(
+  providers: ReadonlyArray<ServerProvider>,
+  provider: ProviderKind,
+): boolean {
+  return getProviderSnapshot(providers, provider)?.status === "ready";
+}
+
 export function resolveSelectableProvider(
   providers: ReadonlyArray<ServerProvider>,
   provider: ProviderKind | null | undefined,
 ): ProviderKind {
   const requested = provider ?? "codex";
-  if (isProviderEnabled(providers, requested)) {
+  if (isProviderEnabled(providers, requested) && isProviderReady(providers, requested)) {
     return requested;
   }
-  return providers.find((candidate) => candidate.enabled)?.provider ?? requested;
+  return (
+    providers.find((candidate) => candidate.enabled && candidate.status === "ready")?.provider ??
+    providers.find((candidate) => candidate.enabled)?.provider ??
+    requested
+  );
 }
 
 export function getProviderModelCapabilities(

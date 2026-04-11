@@ -58,6 +58,7 @@ import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { useNotificationStore } from "../../notifications/notificationStore";
 import {
   useServerAvailableEditors,
   useServerKeybindingsConfigPath,
@@ -518,6 +519,7 @@ export function GeneralSettingsPanel() {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
+  const notificationStore = useNotificationStore();
   const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);
   const [openKeybindingsError, setOpenKeybindingsError] = useState<string | null>(null);
   const [openProviderDetails, setOpenProviderDetails] = useState<Record<ProviderKind, boolean>>({
@@ -768,6 +770,39 @@ export function GeneralSettingsPanel() {
                 ))}
               </SelectPopup>
             </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Notifications"
+          description="Get notified when an agent finishes or needs attention."
+          resetAction={
+            notificationStore.enabled ? (
+              <SettingResetButton
+                label="notifications"
+                onClick={() => notificationStore.setEnabled(false)}
+              />
+            ) : null
+          }
+          control={
+            <div className="flex items-center gap-2">
+              {notificationStore.permission !== "granted" &&
+                notificationStore.permission !== "unsupported" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void notificationStore.requestPermission()}
+                  >
+                    Request permission
+                  </Button>
+                )}
+              <Switch
+                checked={notificationStore.enabled}
+                onCheckedChange={(checked) => notificationStore.setEnabled(Boolean(checked))}
+                aria-label="Enable notifications"
+                disabled={notificationStore.permission === "unsupported"}
+              />
+            </div>
           }
         />
 
