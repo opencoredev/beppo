@@ -28,6 +28,7 @@ export interface AppState {
   threads: Thread[];
   sidebarThreadsById: Record<string, SidebarThreadSummary>;
   threadIdsByProjectId: Record<string, ThreadId[]>;
+  hydratedThreadIds: Record<string, true>;
   bootstrapComplete: boolean;
 }
 
@@ -36,6 +37,7 @@ const initialState: AppState = {
   threads: [],
   sidebarThreadsById: {},
   threadIdsByProjectId: {},
+  hydratedThreadIds: {},
   bootstrapComplete: false,
 };
 const MAX_THREAD_MESSAGES = 2_000;
@@ -317,6 +319,30 @@ function buildSidebarThreadsById(
   );
 }
 
+function mergeSummaryThread(existing: Thread | undefined, summaryThread: Thread): Thread {
+  if (!existing) {
+    return summaryThread;
+  }
+
+  return {
+    ...existing,
+    projectId: summaryThread.projectId,
+    title: summaryThread.title,
+    modelSelection: summaryThread.modelSelection,
+    runtimeMode: summaryThread.runtimeMode,
+    interactionMode: summaryThread.interactionMode,
+    session: summaryThread.session,
+    error: summaryThread.error,
+    createdAt: summaryThread.createdAt,
+    archivedAt: summaryThread.archivedAt,
+    updatedAt: summaryThread.updatedAt,
+    latestTurn: summaryThread.latestTurn,
+    pendingSourceProposedPlan: summaryThread.pendingSourceProposedPlan,
+    branch: summaryThread.branch,
+    worktreePath: summaryThread.worktreePath,
+  };
+}
+
 function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error") {
   if (status === "error") {
     return "error" as const;
@@ -590,7 +616,86 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
     threads,
     sidebarThreadsById,
     threadIdsByProjectId,
+    hydratedThreadIds: Object.fromEntries(threads.map((thread) => [thread.id, true] as const)),
     bootstrapComplete: true,
+  };
+}
+
+export function syncServerReadModelSummary(
+  state: AppState,
+  readModel: OrchestrationReadModel,
+): AppState {
+  const projects = readModel.projects
+    .filter((project) => project.deletedAt === null)
+    .map(mapProject);
+  const previousThreadsById = Object.fromEntries(
+    state.threads.map((thread) => [thread.id, thread] as const),
+  );
+  const hydratedThreadIds: Record<string, true> = {};
+  const threads = readModel.threads
+    .filter((thread) => thread.deletedAt === null)
+    .map((thread) => {
+      const mappedThread = mapThread(thread);
+      const existingThread = previousThreadsById[mappedThread.id];
+      if (!state.hydratedThreadIds[mappedThread.id] || !existingThread) {
+        return mappedThread;
+      }
+      hydratedThreadIds[mappedThread.id] = true;
+      return mergeSummaryThread(existingThread, mappedThread);
+    });
+  const sidebarThreadsById = buildSidebarThreadsById(threads);
+  const threadIdsByProjectId = buildThreadIdsByProjectId(threads);
+  return {
+    ...state,
+    projects,
+    threads,
+    sidebarThreadsById,
+    threadIdsByProjectId,
+    hydratedThreadIds,
+    bootstrapComplete: true,
+  };
+}
+
+export function hydrateThreadSnapshot(
+  state: AppState,
+  threadSnapshot: OrchestrationReadModel["threads"][number],
+): AppState {
+  const nextThread = mapThread(threadSnapshot);
+  const existingThread = state.threads.find((thread) => thread.id === nextThread.id);
+  const threads = existingThread
+    ? state.threads.map((thread) => (thread.id === nextThread.id ? nextThread : thread))
+    : [...state.threads, nextThread];
+  const nextSummary = buildSidebarThreadSummary(nextThread);
+  const previousSummary = state.sidebarThreadsById[nextThread.id];
+  const sidebarThreadsById = sidebarThreadSummariesEqual(previousSummary, nextSummary)
+    ? state.sidebarThreadsById
+    : {
+        ...state.sidebarThreadsById,
+        [nextThread.id]: nextSummary,
+      };
+  const nextThreadIdsByProjectId =
+    existingThread !== undefined && existingThread.projectId !== nextThread.projectId
+      ? removeThreadIdByProjectId(
+          state.threadIdsByProjectId,
+          existingThread.projectId,
+          existingThread.id,
+        )
+      : state.threadIdsByProjectId;
+  const threadIdsByProjectId = appendThreadIdByProjectId(
+    nextThreadIdsByProjectId,
+    nextThread.projectId,
+    nextThread.id,
+  );
+
+  return {
+    ...state,
+    threads,
+    sidebarThreadsById,
+    threadIdsByProjectId,
+    hydratedThreadIds: {
+      ...state.hydratedThreadIds,
+      [nextThread.id]: true,
+    },
   };
 }
 
@@ -703,6 +808,8 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
       const deletedThread = state.threads.find((thread) => thread.id === event.payload.threadId);
       const sidebarThreadsById = { ...state.sidebarThreadsById };
       delete sidebarThreadsById[event.payload.threadId];
+      const hydratedThreadIds = { ...state.hydratedThreadIds };
+      delete hydratedThreadIds[event.payload.threadId];
       const threadIdsByProjectId = deletedThread
         ? removeThreadIdByProjectId(
             state.threadIdsByProjectId,
@@ -715,6 +822,7 @@ export function applyOrchestrationEvent(state: AppState, event: OrchestrationEve
         threads,
         sidebarThreadsById,
         threadIdsByProjectId,
+        hydratedThreadIds,
       };
     }
 
@@ -1149,6 +1257,8 @@ interface AppStore extends AppState {
   /** Alias for `bootstrapComplete` used by route components. */
   threadsHydrated: boolean;
   syncServerReadModel: (readModel: OrchestrationReadModel) => void;
+  syncServerReadModelSummary: (readModel: OrchestrationReadModel) => void;
+  hydrateThreadSnapshot: (thread: OrchestrationReadModel["threads"][number]) => void;
   applyOrchestrationEvent: (event: OrchestrationEvent) => void;
   applyOrchestrationEvents: (events: ReadonlyArray<OrchestrationEvent>) => void;
   setError: (threadId: ThreadId, error: string | null) => void;
@@ -1161,6 +1271,9 @@ export const useStore = create<AppStore>((set, get) => ({
     return get().bootstrapComplete;
   },
   syncServerReadModel: (readModel) => set((state) => syncServerReadModel(state, readModel)),
+  syncServerReadModelSummary: (readModel) =>
+    set((state) => syncServerReadModelSummary(state, readModel)),
+  hydrateThreadSnapshot: (thread) => set((state) => hydrateThreadSnapshot(state, thread)),
   applyOrchestrationEvent: (event) => set((state) => applyOrchestrationEvent(state, event)),
   applyOrchestrationEvents: (events) => set((state) => applyOrchestrationEvents(state, events)),
   setError: (threadId, error) => set((state) => setError(state, threadId, error)),

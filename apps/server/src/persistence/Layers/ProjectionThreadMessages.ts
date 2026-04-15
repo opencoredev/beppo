@@ -44,6 +44,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
     execute: (row) => {
       const nextAttachmentsJson =
         row.attachments !== undefined ? JSON.stringify(row.attachments) : null;
+      const keepsExistingTextWhenEmpty = row.text.length === 0;
       return sql`
         INSERT INTO projection_thread_messages (
           message_id,
@@ -79,13 +80,17 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
           thread_id = excluded.thread_id,
           turn_id = excluded.turn_id,
           role = excluded.role,
-          text = excluded.text,
+          text = CASE
+            WHEN excluded.is_streaming = 1 THEN projection_thread_messages.text || excluded.text
+            WHEN ${keepsExistingTextWhenEmpty} THEN projection_thread_messages.text
+            ELSE excluded.text
+          END,
           attachments_json = COALESCE(
             excluded.attachments_json,
             projection_thread_messages.attachments_json
           ),
           is_streaming = excluded.is_streaming,
-          created_at = excluded.created_at,
+          created_at = projection_thread_messages.created_at,
           updated_at = excluded.updated_at
       `;
     },

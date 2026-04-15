@@ -19,7 +19,7 @@ import {
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { assertFailure, assertInclude, assertTrue } from "@effect/vitest/utils";
-import { Effect, FileSystem, Layer, Path, Stream } from "effect";
+import { Effect, FileSystem, Layer, Option, Path, Stream } from "effect";
 import { HttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 
@@ -217,6 +217,7 @@ const buildAppUnderTest = (options?: {
       Layer.provide(
         Layer.mock(ProjectionSnapshotQuery)({
           getSnapshot: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
+          getThreadSnapshot: () => Effect.succeed(Option.none()),
           ...options?.layers?.projectionSnapshotQuery,
         }),
       ),
@@ -1114,6 +1115,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         layers: {
           projectionSnapshotQuery: {
             getSnapshot: () => Effect.succeed(snapshot),
+            getThreadSnapshot: () => Effect.succeed(Option.none()),
           },
           orchestrationEngine: {
             dispatch: () => Effect.succeed({ sequence: 7 }),
@@ -1260,6 +1262,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   detail: "projection unavailable",
                 }),
               ),
+            getThreadSnapshot: () => Effect.succeed(Option.none()),
           },
         },
       });

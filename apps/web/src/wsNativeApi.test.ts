@@ -71,6 +71,7 @@ const rpcClientMock = {
     upsertKeybinding: vi.fn(),
     getSettings: vi.fn(),
     updateSettings: vi.fn(),
+    transcribeVoice: vi.fn(),
     subscribeConfig: vi.fn(),
     subscribeLifecycle: vi.fn(),
   },
@@ -135,6 +136,9 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
       throw new Error("installUpdate not implemented in test");
     },
     onUpdateState: () => () => undefined,
+    microphone: {
+      openSystemSettings: async () => false,
+    },
     ...overrides,
   };
 }
@@ -327,6 +331,33 @@ describe("wsNativeApi", () => {
     });
   });
 
+  it("forwards voice transcription requests directly to the RPC client", async () => {
+    rpcClientMock.server.transcribeVoice.mockResolvedValue({ text: "voice transcript" });
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+
+    await expect(
+      api.server.transcribeVoice({
+        provider: "codex",
+        cwd: "/tmp/workspace",
+        audioBase64: "UklGRgAAAAAAAAAAAAAAAAAAAAA=",
+        mimeType: "audio/wav",
+        sampleRateHz: 24_000,
+        durationMs: 1_000,
+      }),
+    ).resolves.toEqual({ text: "voice transcript" });
+
+    expect(rpcClientMock.server.transcribeVoice).toHaveBeenCalledWith({
+      provider: "codex",
+      cwd: "/tmp/workspace",
+      audioBase64: "UklGRgAAAAAAAAAAAAAAAAAAAAA=",
+      mimeType: "audio/wav",
+      sampleRateHz: 24_000,
+      durationMs: 1_000,
+    });
+  });
+
   it("forwards context menu metadata to the desktop bridge", async () => {
     const showContextMenu = vi.fn().mockResolvedValue("delete");
     getWindowForTest().desktopBridge = makeDesktopBridge({ showContextMenu });
@@ -348,5 +379,20 @@ describe("wsNativeApi", () => {
 
     await expect(api.contextMenu.show(items, { x: 4, y: 5 })).resolves.toBe("rename");
     expect(showContextMenuFallbackMock).toHaveBeenCalledWith(items, { x: 4, y: 5 });
+  });
+
+  it("forwards microphone recovery to the desktop bridge when available", async () => {
+    const openSystemSettings = vi.fn().mockResolvedValue(true);
+    getWindowForTest().desktopBridge = makeDesktopBridge({
+      microphone: {
+        openSystemSettings,
+      },
+    });
+
+    const { createWsNativeApi } = await import("./wsNativeApi");
+    const api = createWsNativeApi();
+
+    await expect(api.microphone.openSystemSettings()).resolves.toBe(true);
+    expect(openSystemSettings).toHaveBeenCalledWith();
   });
 });

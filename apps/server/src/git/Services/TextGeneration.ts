@@ -8,12 +8,12 @@
  */
 import { ServiceMap } from "effect";
 import type { Effect } from "effect";
-import type { ChatAttachment, ModelSelection } from "@t3tools/contracts";
+import type { ChatAttachment, TextGenerationModelSelection } from "@t3tools/contracts";
 
 import type { TextGenerationError } from "@t3tools/contracts";
 
 /** Providers that support git text generation (commit messages, PR content, branch names). */
-export type TextGenerationProvider = "codex" | "claudeAgent";
+export type TextGenerationProvider = TextGenerationModelSelection["provider"];
 
 export interface CommitMessageGenerationInput {
   cwd: string;
@@ -23,7 +23,7 @@ export interface CommitMessageGenerationInput {
   /** When true, the model also returns a semantic branch name for the change. */
   includeBranch?: boolean;
   /** What model and provider to use for generation. */
-  modelSelection: ModelSelection;
+  modelSelection: TextGenerationModelSelection;
 }
 
 export interface CommitMessageGenerationResult {
@@ -41,7 +41,7 @@ export interface PrContentGenerationInput {
   diffSummary: string;
   diffPatch: string;
   /** What model and provider to use for generation. */
-  modelSelection: ModelSelection;
+  modelSelection: TextGenerationModelSelection;
 }
 
 export interface PrContentGenerationResult {
@@ -54,7 +54,7 @@ export interface BranchNameGenerationInput {
   message: string;
   attachments?: ReadonlyArray<ChatAttachment> | undefined;
   /** What model and provider to use for generation. */
-  modelSelection: ModelSelection;
+  modelSelection: TextGenerationModelSelection;
 }
 
 export interface BranchNameGenerationResult {
@@ -66,7 +66,7 @@ export interface ThreadTitleGenerationInput {
   message: string;
   attachments?: ReadonlyArray<ChatAttachment> | undefined;
   /** What model and provider to use for generation. */
-  modelSelection: ModelSelection;
+  modelSelection: TextGenerationModelSelection;
 }
 
 export interface ThreadTitleGenerationResult {

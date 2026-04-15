@@ -1,7 +1,7 @@
 import { type ProjectEntry, type ProviderKind } from "@t3tools/contracts";
 import { memo, useLayoutEffect, useRef } from "react";
 import { type ComposerSlashCommand, type ComposerTriggerKind } from "../../composer-logic";
-import { BotIcon } from "lucide-react";
+import { BotIcon, PlayIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
 import { Command, CommandItem, CommandList } from "../ui/command";
@@ -20,6 +20,13 @@ export type ComposerCommandItem =
       id: string;
       type: "slash-command";
       command: ComposerSlashCommand;
+      label: string;
+      description: string;
+    }
+  | {
+      id: string;
+      type: "project-script";
+      scriptId: string;
       label: string;
       description: string;
     }
@@ -125,6 +132,9 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
       ) : null}
       {props.item.type === "slash-command" ? (
         <BotIcon className="size-4 text-muted-foreground/80" />
+      ) : null}
+      {props.item.type === "project-script" ? (
+        <PlayIcon className="size-4 text-muted-foreground/80" />
       ) : null}
       {props.item.type === "model" ? (
         <Badge variant="outline" className="px-1.5 py-0 text-[10px]">

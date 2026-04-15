@@ -230,7 +230,6 @@ it.effect("decodes thread.meta-updated payloads with explicit provider", () =>
     assert.strictEqual(parsed.modelSelection?.provider, "claudeAgent");
   }),
 );
-
 it.effect("decodes thread archive and unarchive commands", () =>
   Effect.gen(function* () {
     const archive = yield* decodeOrchestrationCommand({

@@ -1,9 +1,11 @@
-const REPO = "pingdotgg/t3code";
+const REPO = "opencoredev/beppo";
 
-export const RELEASES_URL = `https://github.com/${REPO}/releases`;
+export const REPO_URL = `https://github.com/${REPO}`;
+export const RELEASES_URL = `${REPO_URL}/releases`;
+export const DISCORD_URL = "https://discord.gg/jn4EGJjrvv";
 
 const API_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
-const CACHE_KEY = "t3code-latest-release";
+const CACHE_KEY = "beppo-latest-release";
 
 export interface ReleaseAsset {
   name: string;
@@ -18,9 +20,16 @@ export interface Release {
 
 export async function fetchLatestRelease(): Promise<Release> {
   const cached = sessionStorage.getItem(CACHE_KEY);
-  if (cached) return JSON.parse(cached);
+  if (cached) {
+    return JSON.parse(cached) as Release;
+  }
 
-  const data = await fetch(API_URL).then((r) => r.json());
+  const response = await fetch(API_URL);
+  if (!response.ok) {
+    throw new Error(`Failed to load release metadata: ${response.status}`);
+  }
+
+  const data = (await response.json()) as Release;
 
   if (data?.assets) {
     sessionStorage.setItem(CACHE_KEY, JSON.stringify(data));

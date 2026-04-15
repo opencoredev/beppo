@@ -55,6 +55,7 @@ const OPEN_EXTERNAL_METHOD = "openExternal";
 const UPDATE_GET_STATE_METHOD = "getUpdateState";
 const UPDATE_DOWNLOAD_METHOD = "downloadUpdate";
 const UPDATE_INSTALL_METHOD = "installUpdate";
+const MICROPHONE_OPEN_SYSTEM_SETTINGS_METHOD = "microphone.openSystemSettings";
 
 const MENU_ACTION_EVENT = "menu-action";
 const UPDATE_STATE_EVENT = "update-state";
@@ -209,6 +210,25 @@ function writeBackendSessionBoundary(phase: "START" | "END", details: string): v
 
 function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function openMicrophoneSystemSettings(): Promise<boolean> {
+  const url =
+    process.platform === "darwin"
+      ? "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+      : process.platform === "win32"
+        ? "ms-settings:privacy-microphone"
+        : null;
+
+  if (!url) {
+    return false;
+  }
+
+  try {
+    return Boolean(await Utils.openExternal(url));
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -889,6 +909,9 @@ async function handleBridgeRequest(envelope: DesktopBridgeRequestEnvelope): Prom
     case UPDATE_INSTALL_METHOD: {
       const result = await installDownloadedUpdate();
       return actionResult(result.accepted, result.completed);
+    }
+    case MICROPHONE_OPEN_SYSTEM_SETTINGS_METHOD: {
+      return await openMicrophoneSystemSettings();
     }
     default:
       throw new Error(`Unknown desktop bridge method: ${envelope.method}`);

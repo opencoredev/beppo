@@ -197,7 +197,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   };
 
   yield* projectionPipeline.bootstrap;
-  readModel = yield* projectionSnapshotQuery.getSnapshot();
+  readModel = yield* projectionSnapshotQuery.getSnapshot({ scope: "full" });
 
   const worker = Effect.forever(Queue.take(commandQueue).pipe(Effect.flatMap(processEnvelope)));
   yield* Effect.forkScoped(worker);

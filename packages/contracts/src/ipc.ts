@@ -25,6 +25,8 @@ import type {
 import type {
   ServerConfig,
   ServerProviderUpdatedPayload,
+  ServerVoiceTranscriptionInput,
+  ServerVoiceTranscriptionResult,
   ServerUpsertKeybindingResult,
 } from "./server";
 import type {
@@ -42,11 +44,14 @@ import type {
   ClientOrchestrationCommand,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
+  OrchestrationGetSnapshotInput,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
   OrchestrationEvent,
   OrchestrationReadModel,
+  OrchestrationThread,
 } from "./orchestration";
+import type { ThreadId } from "./baseSchemas";
 import { EditorId } from "./editor";
 import { ServerSettings, ServerSettingsPatch } from "./settings";
 
@@ -103,6 +108,10 @@ export interface DesktopUpdateCheckResult {
   state: DesktopUpdateState;
 }
 
+export interface DesktopMicrophoneBridge {
+  openSystemSettings: () => Promise<boolean>;
+}
+
 export interface DesktopBridge {
   getWsUrl: () => string | null;
   pickFolder: () => Promise<string | null>;
@@ -119,6 +128,7 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
+  microphone: DesktopMicrophoneBridge;
 }
 
 export interface NativeApi {
@@ -165,15 +175,22 @@ export interface NativeApi {
       position?: { x: number; y: number },
     ) => Promise<T | null>;
   };
+  microphone: {
+    openSystemSettings: () => Promise<boolean>;
+  };
   server: {
     getConfig: () => Promise<ServerConfig>;
     refreshProviders: () => Promise<ServerProviderUpdatedPayload>;
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
     getSettings: () => Promise<ServerSettings>;
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
+    transcribeVoice: (
+      input: ServerVoiceTranscriptionInput,
+    ) => Promise<ServerVoiceTranscriptionResult>;
   };
   orchestration: {
-    getSnapshot: () => Promise<OrchestrationReadModel>;
+    getSnapshot: (input?: OrchestrationGetSnapshotInput) => Promise<OrchestrationReadModel>;
+    getThreadSnapshot: (threadId: ThreadId) => Promise<OrchestrationThread | null>;
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
     getTurnDiff: (input: OrchestrationGetTurnDiffInput) => Promise<OrchestrationGetTurnDiffResult>;
     getFullThreadDiff: (

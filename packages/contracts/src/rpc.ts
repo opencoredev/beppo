@@ -35,6 +35,8 @@ import {
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetSnapshotError,
   OrchestrationGetSnapshotInput,
+  OrchestrationGetThreadSnapshotError,
+  OrchestrationGetThreadSnapshotInput,
   OrchestrationGetTurnDiffError,
   OrchestrationGetTurnDiffInput,
   OrchestrationReplayEventsError,
@@ -65,6 +67,9 @@ import {
   ServerConfig,
   ServerLifecycleStreamEvent,
   ServerProviderUpdatedPayload,
+  ServerVoiceTranscriptionError,
+  ServerVoiceTranscriptionInput,
+  ServerVoiceTranscriptionResult,
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
 } from "./server";
@@ -108,6 +113,7 @@ export const WS_METHODS = {
   serverUpsertKeybinding: "server.upsertKeybinding",
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
+  serverTranscribeVoice: "server.transcribeVoice",
 
   // Streaming subscriptions
   subscribeOrchestrationDomainEvents: "subscribeOrchestrationDomainEvents",
@@ -143,6 +149,12 @@ export const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSetting
   payload: Schema.Struct({ patch: ServerSettingsPatch }),
   success: ServerSettings,
   error: ServerSettingsError,
+});
+
+export const WsServerTranscribeVoiceRpc = Rpc.make(WS_METHODS.serverTranscribeVoice, {
+  payload: ServerVoiceTranscriptionInput,
+  success: ServerVoiceTranscriptionResult,
+  error: ServerVoiceTranscriptionError,
 });
 
 export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntries, {
@@ -263,6 +275,15 @@ export const WsOrchestrationGetSnapshotRpc = Rpc.make(ORCHESTRATION_WS_METHODS.g
   error: OrchestrationGetSnapshotError,
 });
 
+export const WsOrchestrationGetThreadSnapshotRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getThreadSnapshot,
+  {
+    payload: OrchestrationGetThreadSnapshotInput,
+    success: OrchestrationRpcSchemas.getThreadSnapshot.output,
+    error: OrchestrationGetThreadSnapshotError,
+  },
+);
+
 export const WsOrchestrationDispatchCommandRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.dispatchCommand,
   {
@@ -327,6 +348,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerUpsertKeybindingRpc,
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
+  WsServerTranscribeVoiceRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
   WsShellOpenInEditorRpc,
@@ -352,6 +374,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsOrchestrationGetSnapshotRpc,
+  WsOrchestrationGetThreadSnapshotRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,

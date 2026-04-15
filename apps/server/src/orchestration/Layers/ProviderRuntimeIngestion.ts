@@ -27,6 +27,7 @@ import {
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { findThreadById } from "../commandInvariants.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerCommandId = (event: ProviderRuntimeEvent, tag: string): CommandId =>
@@ -505,6 +506,18 @@ const make = Effect.fn("make")(function* () {
   const providerService = yield* ProviderService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
+  let assistantDeliveryMode: AssistantDeliveryMode = yield* Effect.map(
+    serverSettingsService.getSettings,
+    (settings) => (settings.enableAssistantStreaming ? "streaming" : "buffered"),
+  );
+
+  yield* Effect.forkScoped(
+    Stream.runForEach(serverSettingsService.streamChanges, (settings) =>
+      Effect.sync(() => {
+        assistantDeliveryMode = settings.enableAssistantStreaming ? "streaming" : "buffered";
+      }),
+    ),
+  );
 
   const turnMessageIdsByTurnKey = yield* Cache.make<string, Set<MessageId>>({
     capacity: TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY,
@@ -526,7 +539,7 @@ const make = Effect.fn("make")(function* () {
 
   const isGitRepoForThread = Effect.fnUntraced(function* (threadId: ThreadId) {
     const readModel = yield* orchestrationEngine.getReadModel();
-    const thread = readModel.threads.find((entry) => entry.id === threadId);
+    const thread = findThreadById(readModel, threadId);
     if (!thread) {
       return false;
     }
@@ -847,7 +860,7 @@ const make = Effect.fn("make")(function* () {
     implementedAt: string,
   ) {
     const readModel = yield* orchestrationEngine.getReadModel();
-    const sourceThread = readModel.threads.find((entry) => entry.id === sourceThreadId);
+    const sourceThread = findThreadById(readModel, sourceThreadId);
     const sourcePlan = sourceThread?.proposedPlans.find((entry) => entry.id === sourcePlanId);
     if (!sourceThread || !sourcePlan || sourcePlan.implementedAt !== null) {
       return;
@@ -873,7 +886,7 @@ const make = Effect.fn("make")(function* () {
     event: ProviderRuntimeEvent,
   ) {
     const readModel = yield* orchestrationEngine.getReadModel();
-    const thread = readModel.threads.find((entry) => entry.id === event.threadId);
+    const thread = findThreadById(readModel, event.threadId);
     if (!thread) return;
 
     const now = event.createdAt;
@@ -1008,10 +1021,6 @@ const make = Effect.fn("make")(function* () {
         yield* rememberAssistantMessageId(thread.id, turnId, assistantMessageId);
       }
 
-      const assistantDeliveryMode: AssistantDeliveryMode = yield* Effect.map(
-        serverSettingsService.getSettings,
-        (settings) => (settings.enableAssistantStreaming ? "streaming" : "buffered"),
-      );
       if (assistantDeliveryMode === "buffered") {
         const spillChunk = yield* appendBufferedAssistantText(assistantMessageId, assistantDelta);
         if (spillChunk.length > 0) {
