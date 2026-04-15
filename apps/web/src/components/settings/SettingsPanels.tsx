@@ -6,24 +6,20 @@ import {
   LoaderIcon,
   PlusIcon,
   RefreshCwIcon,
-  Undo2Icon,
   XIcon,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import {
-  DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   PROVIDER_DISPLAY_NAMES,
+  type DesktopUpdateChannel,
+  type ScopedThreadRef,
   type ProviderKind,
   type ServerProvider,
   type ServerProviderModel,
-  type TextGenerationModelSelection,
-  ThreadId,
 } from "@t3tools/contracts";
-import {
-  DEFAULT_UNIFIED_SETTINGS,
-  type OpenAICompatibleEndpointSettings,
-} from "@t3tools/contracts/settings";
+import { scopeThreadRef } from "@t3tools/client-runtime";
+import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { Equal } from "effect";
 import { APP_VERSION } from "../../branding";
@@ -50,10 +46,15 @@ import {
   getCustomModelOptionsByProvider,
   resolveAppModelSelectionState,
 } from "../../modelSelection";
-import { ensureNativeApi, readNativeApi } from "../../nativeApi";
-import { useStore } from "../../store";
+import { ensureLocalApi, readLocalApi } from "../../localApi";
+import { useShallow } from "zustand/react/shallow";
+import {
+  selectProjectsAcrossEnvironments,
+  selectThreadShellsAcrossEnvironments,
+  useStore,
+} from "../../store";
 import { formatRelativeTime, formatRelativeTimeLabel } from "../../timestampFormat";
-import { cn, randomUUID } from "../../lib/utils";
+import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent } from "../ui/collapsible";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
@@ -62,11 +63,18 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import {
+  SettingResetButton,
+  SettingsPageContainer,
+  SettingsRow,
+  SettingsSection,
+  useRelativeTimeTick,
+} from "./settingsLayout";
 import { ProjectFavicon } from "../ProjectFavicon";
-import { useNotificationStore } from "../../notifications/notificationStore";
 import {
   useServerAvailableEditors,
   useServerKeybindingsConfigPath,
+  useServerObservability,
   useServerProviders,
 } from "../../rpc/serverState";
 
@@ -90,29 +98,6 @@ const TIMESTAMP_FORMAT_LABELS = {
   "12-hour": "12-hour",
   "24-hour": "24-hour",
 } as const;
-
-const CUSTOM_TEXT_ENDPOINT_PREFIX = "openaiCompatible:";
-
-function createOpenAICompatibleEndpoint(existingCount: number): OpenAICompatibleEndpointSettings {
-  return {
-    id: `openai-compatible-${randomUUID()}`,
-    label: `Custom endpoint ${existingCount + 1}`,
-    enabled: true,
-    baseUrl: "https://api.openai.com/v1",
-    apiKey: "",
-    apiKeyEnvVar: "",
-    model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.openaiCompatible,
-    wireApi: "chat-completions",
-  };
-}
-
-function getTextGenerationTargetValue(selection: TextGenerationModelSelection): string {
-  if (selection.provider === "openaiCompatible") {
-    return `${CUSTOM_TEXT_ENDPOINT_PREFIX}${selection.endpointId}`;
-  }
-
-  return selection.provider;
-}
 
 type InstallProviderSettings = {
   provider: ProviderKind;
@@ -168,7 +153,7 @@ function getProviderSummary(provider: ServerProvider | undefined) {
     return {
       headline: "Disabled",
       detail:
-        provider.message ?? "This provider is installed but disabled for new sessions in Beppo.",
+        provider.message ?? "This provider is installed but disabled for new sessions in T3 Code.",
     };
   }
   if (!provider.installed) {
@@ -214,15 +199,6 @@ function getProviderVersionLabel(version: string | null | undefined) {
   return version.startsWith("v") ? version : `v${version}`;
 }
 
-function useRelativeTimeTick(intervalMs = 1_000) {
-  const [tick, setTick] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setTick(Date.now()), intervalMs);
-    return () => clearInterval(id);
-  }, [intervalMs]);
-  return tick;
-}
-
 function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null }) {
   useRelativeTimeTick();
   const lastCheckedRelative = lastCheckedAt ? formatRelativeTime(lastCheckedAt) : null;
@@ -245,104 +221,6 @@ function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null }
   );
 }
 
-function SettingsSection({
-  title,
-  icon,
-  headerAction,
-  children,
-}: {
-  title: string;
-  icon?: ReactNode;
-  headerAction?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-          {icon}
-          {title}
-        </h2>
-        {headerAction}
-      </div>
-      <div className="relative overflow-hidden rounded-2xl border bg-card text-card-foreground shadow-xs/5 not-dark:bg-clip-padding before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-2xl)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]">
-        {children}
-      </div>
-    </section>
-  );
-}
-
-function SettingsRow({
-  title,
-  description,
-  status,
-  resetAction,
-  control,
-  children,
-}: {
-  title: ReactNode;
-  description: string;
-  status?: ReactNode;
-  resetAction?: ReactNode;
-  control?: ReactNode;
-  children?: ReactNode;
-}) {
-  return (
-    <div className="border-t border-border px-4 py-4 first:border-t-0 sm:px-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0 flex-1 space-y-1">
-          <div className="flex min-h-5 items-center gap-1.5">
-            <h3 className="text-sm font-medium text-foreground">{title}</h3>
-            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
-              {resetAction}
-            </span>
-          </div>
-          <p className="text-xs text-muted-foreground">{description}</p>
-          {status ? <div className="pt-1 text-[11px] text-muted-foreground">{status}</div> : null}
-        </div>
-        {control ? (
-          <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
-            {control}
-          </div>
-        ) : null}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function SettingResetButton({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            aria-label={`Reset ${label} to default`}
-            className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
-            onClick={(event) => {
-              event.stopPropagation();
-              onClick();
-            }}
-          >
-            <Undo2Icon className="size-3" />
-          </Button>
-        }
-      />
-      <TooltipPopup side="top">Reset to default</TooltipPopup>
-    </Tooltip>
-  );
-}
-
-function SettingsPageContainer({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex-1 overflow-y-auto p-6">
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">{children}</div>
-    </div>
-  );
-}
-
 function AboutVersionTitle() {
   return (
     <span className="inline-flex items-center gap-2">
@@ -355,8 +233,42 @@ function AboutVersionTitle() {
 function AboutVersionSection() {
   const queryClient = useQueryClient();
   const updateStateQuery = useDesktopUpdateState();
+  const [isChangingUpdateChannel, setIsChangingUpdateChannel] = useState(false);
 
   const updateState = updateStateQuery.data ?? null;
+  const hasDesktopBridge = typeof window !== "undefined" && Boolean(window.desktopBridge);
+  const selectedUpdateChannel = updateState?.channel ?? "latest";
+
+  const handleUpdateChannelChange = useCallback(
+    (channel: DesktopUpdateChannel) => {
+      const bridge = window.desktopBridge;
+      if (
+        !bridge ||
+        typeof bridge.setUpdateChannel !== "function" ||
+        channel === selectedUpdateChannel
+      ) {
+        return;
+      }
+
+      setIsChangingUpdateChannel(true);
+      void bridge
+        .setUpdateChannel(channel)
+        .then((state) => {
+          setDesktopUpdateStateQueryData(queryClient, state);
+        })
+        .catch((error: unknown) => {
+          toastManager.add({
+            type: "error",
+            title: "Could not change update track",
+            description: error instanceof Error ? error.message : "Update track change failed.",
+          });
+        })
+        .finally(() => {
+          setIsChangingUpdateChannel(false);
+        });
+    },
+    [queryClient, selectedUpdateChannel],
+  );
 
   const handleButtonClick = useCallback(() => {
     const bridge = window.desktopBridge;
@@ -446,27 +358,59 @@ function AboutVersionSection() {
       : "Current version of the application.";
 
   return (
-    <SettingsRow
-      title={<AboutVersionTitle />}
-      description={description}
-      control={
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                size="xs"
-                variant={action === "install" ? "default" : "outline"}
-                disabled={buttonDisabled}
-                onClick={handleButtonClick}
-              >
-                {buttonLabel}
-              </Button>
-            }
-          />
-          {buttonTooltip ? <TooltipPopup>{buttonTooltip}</TooltipPopup> : null}
-        </Tooltip>
-      }
-    />
+    <>
+      <SettingsRow
+        title={<AboutVersionTitle />}
+        description={description}
+        control={
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="xs"
+                  variant={action === "install" ? "default" : "outline"}
+                  disabled={buttonDisabled}
+                  onClick={handleButtonClick}
+                >
+                  {buttonLabel}
+                </Button>
+              }
+            />
+            {buttonTooltip ? <TooltipPopup>{buttonTooltip}</TooltipPopup> : null}
+          </Tooltip>
+        }
+      />
+      <SettingsRow
+        title="Update track"
+        description="Stable follows full releases. Nightly follows the nightly desktop channel and can switch back to stable immediately."
+        control={
+          <Select
+            value={selectedUpdateChannel}
+            onValueChange={(value) => {
+              handleUpdateChannelChange(value as DesktopUpdateChannel);
+            }}
+          >
+            <SelectTrigger
+              className="w-full sm:w-40"
+              aria-label="Update track"
+              disabled={!hasDesktopBridge || isChangingUpdateChannel}
+            >
+              <SelectValue>
+                {selectedUpdateChannel === "nightly" ? "Nightly" : "Stable"}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              <SelectItem hideIndicator value="latest">
+                Stable
+              </SelectItem>
+              <SelectItem hideIndicator value="nightly">
+                Nightly
+              </SelectItem>
+            </SelectPopup>
+          </Select>
+        }
+      />
+    </>
   );
 }
 
@@ -479,17 +423,6 @@ export function useSettingsRestore(onRestored?: () => void) {
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
-  const areCustomTextEndpointsDirty = !Equal.equals(
-    settings.providers.openaiCompatible,
-    DEFAULT_UNIFIED_SETTINGS.providers.openaiCompatible,
-  );
-  const isSidebarAppearanceDirty =
-    settings.showSidebarProviders !== DEFAULT_UNIFIED_SETTINGS.showSidebarProviders ||
-    settings.showSidebarUpdatePill !== DEFAULT_UNIFIED_SETTINGS.showSidebarUpdatePill ||
-    !Equal.equals(
-      settings.sidebarProviderVisibility,
-      DEFAULT_UNIFIED_SETTINGS.sidebarProviderVisibility,
-    );
   const areProviderSettingsDirty = PROVIDER_SETTINGS.some((providerSettings) => {
     const currentSettings = settings.providers[providerSettings.provider];
     const defaultSettings = DEFAULT_UNIFIED_SETTINGS.providers[providerSettings.provider];
@@ -505,12 +438,14 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap
         ? ["Diff line wrapping"]
         : []),
-      ...(isSidebarAppearanceDirty ? ["Sidebar appearance"] : []),
       ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
         ? ["Assistant output"]
         : []),
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
         ? ["New thread mode"]
+        : []),
+      ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
+        ? ["Add project base directory"]
         : []),
       ...(settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
         ? ["Archive confirmation"]
@@ -519,28 +454,26 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Delete confirmation"]
         : []),
       ...(isGitWritingModelDirty ? ["Git writing model"] : []),
-      ...(areCustomTextEndpointsDirty ? ["Custom text endpoints"] : []),
       ...(areProviderSettingsDirty ? ["Providers"] : []),
     ],
     [
-      areCustomTextEndpointsDirty,
       areProviderSettingsDirty,
       isGitWritingModelDirty,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
+      settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
       settings.timestampFormat,
       theme,
-      isSidebarAppearanceDirty,
     ],
   );
 
   const restoreDefaults = useCallback(async () => {
     if (changedSettingLabels.length === 0) return;
-    const api = readNativeApi();
-    const confirmed = await (api ?? ensureNativeApi()).dialogs.confirm(
+    const api = readLocalApi();
+    const confirmed = await (api ?? ensureLocalApi()).dialogs.confirm(
       ["Restore default settings?", `This will reset: ${changedSettingLabels.join(", ")}.`].join(
         "\n",
       ),
@@ -562,9 +495,13 @@ export function GeneralSettingsPanel() {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
-  const notificationStore = useNotificationStore();
-  const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);
-  const [openKeybindingsError, setOpenKeybindingsError] = useState<string | null>(null);
+  const [openingPathByTarget, setOpeningPathByTarget] = useState({
+    keybindings: false,
+    logsDirectory: false,
+  });
+  const [openPathErrorByTarget, setOpenPathErrorByTarget] = useState<
+    Partial<Record<"keybindings" | "logsDirectory", string | null>>
+  >({});
   const [openProviderDetails, setOpenProviderDetails] = useState<Record<ProviderKind, boolean>>({
     codex: Boolean(
       settings.providers.codex.binaryPath !== DEFAULT_UNIFIED_SETTINGS.providers.codex.binaryPath ||
@@ -593,7 +530,7 @@ export function GeneralSettingsPanel() {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     setIsRefreshingProviders(true);
-    void ensureNativeApi()
+    void ensureLocalApi()
       .server.refreshProviders()
       .catch((error: unknown) => {
         console.warn("Failed to refresh providers", error);
@@ -606,18 +543,33 @@ export function GeneralSettingsPanel() {
 
   const keybindingsConfigPath = useServerKeybindingsConfigPath();
   const availableEditors = useServerAvailableEditors();
+  const observability = useServerObservability();
   const serverProviders = useServerProviders();
   const codexHomePath = settings.providers.codex.homePath;
-  const openaiCompatibleEndpoints = settings.providers.openaiCompatible.endpoints;
+  const logsDirectoryPath = observability?.logsDirectoryPath ?? null;
+  const diagnosticsDescription = (() => {
+    const exports: string[] = [];
+    if (observability?.otlpTracesEnabled && observability.otlpTracesUrl) {
+      exports.push(`traces to ${observability.otlpTracesUrl}`);
+    }
+    if (observability?.otlpMetricsEnabled && observability.otlpMetricsUrl) {
+      exports.push(`metrics to ${observability.otlpMetricsUrl}`);
+    }
+    const mode = observability?.localTracingEnabled ? "Local trace file" : "Terminal logs only";
+    return exports.length > 0 ? `${mode}. OTLP exporting ${exports.join(" and ")}.` : `${mode}.`;
+  })();
 
   const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
   const textGenProvider = textGenerationModelSelection.provider;
   const textGenModel = textGenerationModelSelection.model;
   const textGenModelOptions =
     "options" in textGenerationModelSelection ? textGenerationModelSelection.options : undefined;
+  const openAICompatibleEndpoints = settings.providers.openaiCompatible.endpoints.filter(
+    (endpoint) => endpoint.enabled,
+  );
   const selectedOpenAICompatibleEndpoint =
     textGenProvider === "openaiCompatible"
-      ? (openaiCompatibleEndpoints.find(
+      ? (openAICompatibleEndpoints.find(
           (endpoint) => endpoint.id === textGenerationModelSelection.endpointId,
         ) ?? null)
       : null;
@@ -631,32 +583,50 @@ export function GeneralSettingsPanel() {
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
-  const areCustomTextEndpointsDirty = !Equal.equals(
-    settings.providers.openaiCompatible,
-    DEFAULT_UNIFIED_SETTINGS.providers.openaiCompatible,
+
+  const openInPreferredEditor = useCallback(
+    (target: "keybindings" | "logsDirectory", path: string | null, failureMessage: string) => {
+      if (!path) return;
+      setOpenPathErrorByTarget((existing) => ({ ...existing, [target]: null }));
+      setOpeningPathByTarget((existing) => ({ ...existing, [target]: true }));
+
+      const editor = resolveAndPersistPreferredEditor(availableEditors ?? []);
+      if (!editor) {
+        setOpenPathErrorByTarget((existing) => ({
+          ...existing,
+          [target]: "No available editors found.",
+        }));
+        setOpeningPathByTarget((existing) => ({ ...existing, [target]: false }));
+        return;
+      }
+
+      void ensureLocalApi()
+        .shell.openInEditor(path, editor)
+        .catch((error) => {
+          setOpenPathErrorByTarget((existing) => ({
+            ...existing,
+            [target]: error instanceof Error ? error.message : failureMessage,
+          }));
+        })
+        .finally(() => {
+          setOpeningPathByTarget((existing) => ({ ...existing, [target]: false }));
+        });
+    },
+    [availableEditors],
   );
 
   const openKeybindingsFile = useCallback(() => {
-    if (!keybindingsConfigPath) return;
-    setOpenKeybindingsError(null);
-    setIsOpeningKeybindings(true);
-    const editor = resolveAndPersistPreferredEditor(availableEditors ?? []);
-    if (!editor) {
-      setOpenKeybindingsError("No available editors found.");
-      setIsOpeningKeybindings(false);
-      return;
-    }
-    void ensureNativeApi()
-      .shell.openInEditor(keybindingsConfigPath, editor)
-      .catch((error) => {
-        setOpenKeybindingsError(
-          error instanceof Error ? error.message : "Unable to open keybindings file.",
-        );
-      })
-      .finally(() => {
-        setIsOpeningKeybindings(false);
-      });
-  }, [availableEditors, keybindingsConfigPath]);
+    openInPreferredEditor("keybindings", keybindingsConfigPath, "Unable to open keybindings file.");
+  }, [keybindingsConfigPath, openInPreferredEditor]);
+
+  const openLogsDirectory = useCallback(() => {
+    openInPreferredEditor("logsDirectory", logsDirectoryPath, "Unable to open logs folder.");
+  }, [logsDirectoryPath, openInPreferredEditor]);
+
+  const openKeybindingsError = openPathErrorByTarget.keybindings ?? null;
+  const openDiagnosticsError = openPathErrorByTarget.logsDirectory ?? null;
+  const isOpeningKeybindings = openingPathByTarget.keybindings;
+  const isOpeningLogsDirectory = openingPathByTarget.logsDirectory;
 
   const addCustomModel = useCallback(
     (provider: ProviderKind) => {
@@ -749,104 +719,6 @@ export function GeneralSettingsPanel() {
     [settings, updateSettings],
   );
 
-  const updateOpenAICompatibleEndpoints = useCallback(
-    (nextEndpoints: ReadonlyArray<OpenAICompatibleEndpointSettings>) => {
-      const nextSettings = {
-        ...settings,
-        providers: {
-          ...settings.providers,
-          openaiCompatible: {
-            endpoints: [...nextEndpoints],
-          },
-        },
-      };
-
-      updateSettings({
-        providers: nextSettings.providers,
-        textGenerationModelSelection: resolveAppModelSelectionState(nextSettings, serverProviders),
-      });
-    },
-    [serverProviders, settings, updateSettings],
-  );
-
-  const addOpenAICompatibleEndpoint = useCallback(() => {
-    updateOpenAICompatibleEndpoints([
-      ...openaiCompatibleEndpoints,
-      createOpenAICompatibleEndpoint(openaiCompatibleEndpoints.length),
-    ]);
-  }, [openaiCompatibleEndpoints, updateOpenAICompatibleEndpoints]);
-
-  const updateOpenAICompatibleEndpoint = useCallback(
-    (endpointId: string, patch: Partial<OpenAICompatibleEndpointSettings>) => {
-      updateOpenAICompatibleEndpoints(
-        openaiCompatibleEndpoints.map((endpoint) =>
-          endpoint.id === endpointId ? { ...endpoint, ...patch } : endpoint,
-        ),
-      );
-    },
-    [openaiCompatibleEndpoints, updateOpenAICompatibleEndpoints],
-  );
-
-  const removeOpenAICompatibleEndpoint = useCallback(
-    (endpointId: string) => {
-      updateOpenAICompatibleEndpoints(
-        openaiCompatibleEndpoints.filter((endpoint) => endpoint.id !== endpointId),
-      );
-    },
-    [openaiCompatibleEndpoints, updateOpenAICompatibleEndpoints],
-  );
-
-  const handleTextGenerationTargetChange = useCallback(
-    (value: string) => {
-      if (value === "codex" || value === "claudeAgent") {
-        updateSettings({
-          textGenerationModelSelection: resolveAppModelSelectionState(
-            {
-              ...settings,
-              textGenerationModelSelection: {
-                provider: value,
-                model:
-                  textGenProvider === value
-                    ? textGenModel
-                    : value === "codex"
-                      ? DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex
-                      : DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.claudeAgent,
-              },
-            },
-            serverProviders,
-          ),
-        });
-        return;
-      }
-
-      if (!value.startsWith(CUSTOM_TEXT_ENDPOINT_PREFIX)) {
-        return;
-      }
-
-      const endpointId = value.slice(CUSTOM_TEXT_ENDPOINT_PREFIX.length);
-      const endpoint = openaiCompatibleEndpoints.find((candidate) => candidate.id === endpointId);
-      if (!endpoint) {
-        return;
-      }
-
-      updateSettings({
-        textGenerationModelSelection: {
-          provider: "openaiCompatible",
-          endpointId: endpoint.id,
-          model: endpoint.model,
-        },
-      });
-    },
-    [
-      openaiCompatibleEndpoints,
-      serverProviders,
-      settings,
-      textGenModel,
-      textGenProvider,
-      updateSettings,
-    ],
-  );
-
   const providerCards = PROVIDER_SETTINGS.map((providerSettings) => {
     const liveProvider = serverProviders.find(
       (candidate) => candidate.provider === providerSettings.provider,
@@ -890,12 +762,13 @@ export function GeneralSettingsPanel() {
           serverProviders[0]!.checkedAt,
         )
       : null;
+
   return (
     <SettingsPageContainer>
       <SettingsSection title="General">
         <SettingsRow
           title="Theme"
-          description="Choose how Beppo looks across the app."
+          description="Choose how T3 Code looks across the app."
           resetAction={
             theme !== "system" ? (
               <SettingResetButton label="theme" onClick={() => setTheme("system")} />
@@ -923,39 +796,6 @@ export function GeneralSettingsPanel() {
                 ))}
               </SelectPopup>
             </Select>
-          }
-        />
-
-        <SettingsRow
-          title="Notifications"
-          description="Get notified when an agent finishes or needs attention."
-          resetAction={
-            notificationStore.enabled ? (
-              <SettingResetButton
-                label="notifications"
-                onClick={() => notificationStore.setEnabled(false)}
-              />
-            ) : null
-          }
-          control={
-            <div className="flex items-center gap-2">
-              {notificationStore.permission !== "granted" &&
-                notificationStore.permission !== "unsupported" && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void notificationStore.requestPermission()}
-                  >
-                    Request permission
-                  </Button>
-                )}
-              <Switch
-                checked={notificationStore.enabled}
-                onCheckedChange={(checked) => notificationStore.setEnabled(Boolean(checked))}
-                aria-label="Enable notifications"
-                disabled={notificationStore.permission === "unsupported"}
-              />
-            </div>
           }
         />
 
@@ -1094,6 +934,34 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
+          title="Add project starts in"
+          description='Leave empty to use "~/" when the Add Project browser opens.'
+          resetAction={
+            settings.addProjectBaseDirectory !==
+            DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory ? (
+              <SettingResetButton
+                label="add project base directory"
+                onClick={() =>
+                  updateSettings({
+                    addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Input
+              className="w-full sm:w-72"
+              value={settings.addProjectBaseDirectory}
+              onChange={(event) => updateSettings({ addProjectBaseDirectory: event.target.value })}
+              placeholder="~/"
+              spellCheck={false}
+              aria-label="Add project base directory"
+            />
+          }
+        />
+
+        <SettingsRow
           title="Archive confirmation"
           description="Require a second click on the inline archive action before a thread is archived."
           resetAction={
@@ -1147,7 +1015,7 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           title="Text generation model"
-          description="Choose what Beppo uses for commit messages, PR text, branch names, and thread titles."
+          description="Configure the model used for generated commit messages, PR titles, and similar Git text."
           resetAction={
             isGitWritingModelDirty ? (
               <SettingResetButton
@@ -1162,63 +1030,66 @@ export function GeneralSettingsPanel() {
             ) : null
           }
           control={
-            <div className="flex min-w-[18rem] max-w-full flex-col items-stretch gap-2">
-              <Select
-                value={getTextGenerationTargetValue(textGenerationModelSelection)}
-                onValueChange={(value) => {
-                  if (typeof value === "string") {
-                    handleTextGenerationTargetChange(value);
-                  }
-                }}
-              >
-                <SelectTrigger className="w-full" aria-label="Text generation target">
-                  <SelectValue>
-                    {textGenProvider === "openaiCompatible"
-                      ? (selectedOpenAICompatibleEndpoint?.label ?? "Custom endpoint")
-                      : PROVIDER_DISPLAY_NAMES[textGenProvider]}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  <SelectItem hideIndicator value="codex">
-                    Codex
-                  </SelectItem>
-                  <SelectItem hideIndicator value="claudeAgent">
-                    Claude
-                  </SelectItem>
-                  {openaiCompatibleEndpoints.length > 0 ? (
-                    <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground">
-                      Custom endpoints
-                    </div>
-                  ) : null}
-                  {openaiCompatibleEndpoints.map((endpoint) => (
-                    <SelectItem
-                      hideIndicator
-                      key={endpoint.id}
-                      value={`${CUSTOM_TEXT_ENDPOINT_PREFIX}${endpoint.id}`}
-                    >
-                      {endpoint.label}
-                      {!endpoint.enabled ? " (disabled)" : ""}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
               {textGenProvider === "openaiCompatible" ? (
-                <div className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-left">
-                  <div className="text-xs font-medium text-foreground">
-                    {selectedOpenAICompatibleEndpoint?.label ?? "Custom endpoint"}
-                  </div>
-                  <div className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                    Uses <code className="font-mono text-foreground/85">{textGenModel}</code> via{" "}
-                    <code className="font-mono text-foreground/85">
-                      {selectedOpenAICompatibleEndpoint?.baseUrl ?? "custom base URL"}
-                    </code>
-                    . These endpoints are for generated Git and title text only, not interactive
-                    sessions.
-                  </div>
-                </div>
+                <>
+                  {openAICompatibleEndpoints.length > 0 ? (
+                    <Select
+                      value={selectedOpenAICompatibleEndpoint?.id ?? ""}
+                      onValueChange={(endpointId) => {
+                        const endpoint = openAICompatibleEndpoints.find(
+                          (candidate) => candidate.id === endpointId,
+                        );
+                        if (!endpoint) {
+                          return;
+                        }
+                        updateSettings({
+                          textGenerationModelSelection: {
+                            provider: "openaiCompatible",
+                            endpointId: endpoint.id,
+                            model: endpoint.model,
+                          },
+                        });
+                      }}
+                    >
+                      <SelectTrigger
+                        className="w-full sm:w-56"
+                        aria-label="Custom text-generation endpoint"
+                      >
+                        <SelectValue>
+                          {selectedOpenAICompatibleEndpoint?.label ?? "Custom endpoint"}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectPopup align="end" alignItemWithTrigger={false}>
+                        {openAICompatibleEndpoints.map((endpoint) => (
+                          <SelectItem hideIndicator key={endpoint.id} value={endpoint.id}>
+                            {endpoint.label}
+                          </SelectItem>
+                        ))}
+                      </SelectPopup>
+                    </Select>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">
+                      Add a custom endpoint to use OpenAI-compatible text generation.
+                    </span>
+                  )}
+                  <Input
+                    className="w-full sm:w-48"
+                    value={textGenModel}
+                    onChange={(event) => {
+                      updateSettings({
+                        textGenerationModelSelection: {
+                          provider: "openaiCompatible",
+                          endpointId: selectedOpenAICompatibleEndpoint?.id ?? "",
+                          model: event.currentTarget.value,
+                        },
+                      });
+                    }}
+                    placeholder="custom-model"
+                  />
+                </>
               ) : (
-                <div className="flex flex-wrap items-center justify-end gap-1.5">
+                <>
                   <ProviderModelPicker
                     provider={textGenProvider}
                     model={textGenModel}
@@ -1268,116 +1139,11 @@ export function GeneralSettingsPanel() {
                       });
                     }}
                   />
-                </div>
+                </>
               )}
-              <div className="text-right text-[11px] leading-relaxed text-muted-foreground">
-                Custom endpoints are used for generated text only. Interactive chat/session
-                providers stay separate.
-              </div>
             </div>
           }
         />
-      </SettingsSection>
-
-      <SettingsSection title="Sidebar">
-        <SettingsRow
-          title="Update pill"
-          description="Show desktop update availability above the sidebar footer actions."
-          resetAction={
-            settings.showSidebarUpdatePill !== DEFAULT_UNIFIED_SETTINGS.showSidebarUpdatePill ? (
-              <SettingResetButton
-                label="sidebar update pill"
-                onClick={() =>
-                  updateSettings({
-                    showSidebarUpdatePill: DEFAULT_UNIFIED_SETTINGS.showSidebarUpdatePill,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.showSidebarUpdatePill}
-              onCheckedChange={(checked) =>
-                updateSettings({ showSidebarUpdatePill: Boolean(checked) })
-              }
-              aria-label="Show sidebar update pill"
-            />
-          }
-        />
-
-        <SettingsRow
-          title="Provider cards"
-          description="Show provider status and rate-limit cards in the sidebar footer."
-          resetAction={
-            settings.showSidebarProviders !== DEFAULT_UNIFIED_SETTINGS.showSidebarProviders ? (
-              <SettingResetButton
-                label="sidebar provider cards"
-                onClick={() =>
-                  updateSettings({
-                    showSidebarProviders: DEFAULT_UNIFIED_SETTINGS.showSidebarProviders,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.showSidebarProviders}
-              onCheckedChange={(checked) =>
-                updateSettings({ showSidebarProviders: Boolean(checked) })
-              }
-              aria-label="Show sidebar provider cards"
-            />
-          }
-        />
-
-        {settings.showSidebarProviders
-          ? PROVIDER_SETTINGS.map((providerSettings) => {
-              const providerLabel =
-                PROVIDER_DISPLAY_NAMES[providerSettings.provider] ?? providerSettings.title;
-              const isVisible = settings.sidebarProviderVisibility[providerSettings.provider];
-              const defaultVisible =
-                DEFAULT_UNIFIED_SETTINGS.sidebarProviderVisibility[providerSettings.provider];
-
-              return (
-                <SettingsRow
-                  key={`sidebar-provider-${providerSettings.provider}`}
-                  title={`${providerLabel} card`}
-                  description={`Show the ${providerLabel} status card in the sidebar footer.`}
-                  resetAction={
-                    isVisible !== defaultVisible ? (
-                      <SettingResetButton
-                        label={`${providerLabel} sidebar card`}
-                        onClick={() =>
-                          updateSettings({
-                            sidebarProviderVisibility: {
-                              ...settings.sidebarProviderVisibility,
-                              [providerSettings.provider]: defaultVisible,
-                            },
-                          })
-                        }
-                      />
-                    ) : null
-                  }
-                  control={
-                    <Switch
-                      checked={isVisible}
-                      onCheckedChange={(checked) =>
-                        updateSettings({
-                          sidebarProviderVisibility: {
-                            ...settings.sidebarProviderVisibility,
-                            [providerSettings.provider]: Boolean(checked),
-                          },
-                        })
-                      }
-                      aria-label={`Show ${providerLabel} sidebar card`}
-                    />
-                  }
-                />
-              );
-            })
-          : null}
       </SettingsSection>
 
       <SettingsSection
@@ -1719,163 +1485,6 @@ export function GeneralSettingsPanel() {
             </div>
           );
         })}
-
-        <div className="border-t border-border">
-          <div className="px-4 py-4 sm:px-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0 flex-1 space-y-1">
-                <div className="flex min-h-5 items-center gap-1.5">
-                  <h3 className="text-sm font-medium text-foreground">
-                    Custom text-generation endpoints
-                  </h3>
-                  <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
-                    {areCustomTextEndpointsDirty ? (
-                      <SettingResetButton
-                        label="custom text-generation endpoints"
-                        onClick={() =>
-                          updateSettings({
-                            providers: {
-                              ...settings.providers,
-                              openaiCompatible: DEFAULT_UNIFIED_SETTINGS.providers.openaiCompatible,
-                            },
-                            textGenerationModelSelection:
-                              DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
-                          })
-                        }
-                      />
-                    ) : null}
-                  </span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Add OpenAI-compatible endpoints for commit messages, PR text, branch names, and
-                  thread titles. These are not interactive session providers yet.
-                </p>
-              </div>
-              <Button size="sm" variant="outline" onClick={addOpenAICompatibleEndpoint}>
-                <PlusIcon className="size-3.5" />
-                Add endpoint
-              </Button>
-            </div>
-
-            {openaiCompatibleEndpoints.length === 0 ? (
-              <div className="mt-4 rounded-xl border border-dashed border-border/70 bg-muted/15 px-4 py-3 text-sm text-muted-foreground">
-                No custom endpoints yet.
-              </div>
-            ) : (
-              <div className="mt-4 space-y-3">
-                {openaiCompatibleEndpoints.map((endpoint) => (
-                  <div
-                    key={endpoint.id}
-                    className="rounded-xl border border-border/70 bg-muted/15 p-3 sm:p-4"
-                  >
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0 flex-1">
-                        <Input
-                          value={endpoint.label}
-                          onChange={(event) =>
-                            updateOpenAICompatibleEndpoint(endpoint.id, {
-                              label: event.target.value || endpoint.label,
-                            })
-                          }
-                          placeholder="Endpoint label"
-                          aria-label={`Label for ${endpoint.label}`}
-                        />
-                      </div>
-                      <div className="flex items-center justify-end gap-2">
-                        <Switch
-                          checked={endpoint.enabled}
-                          onCheckedChange={(checked) =>
-                            updateOpenAICompatibleEndpoint(endpoint.id, {
-                              enabled: Boolean(checked),
-                            })
-                          }
-                          aria-label={`Enable ${endpoint.label}`}
-                        />
-                        <Button
-                          size="icon-xs"
-                          variant="ghost"
-                          className="size-7 rounded-md text-muted-foreground hover:text-foreground"
-                          onClick={() => removeOpenAICompatibleEndpoint(endpoint.id)}
-                          aria-label={`Remove ${endpoint.label}`}
-                        >
-                          <XIcon className="size-3.5" />
-                        </Button>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                      <label className="block">
-                        <span className="text-xs font-medium text-foreground">Base URL</span>
-                        <Input
-                          className="mt-1.5"
-                          value={endpoint.baseUrl}
-                          onChange={(event) =>
-                            updateOpenAICompatibleEndpoint(endpoint.id, {
-                              baseUrl: event.target.value || endpoint.baseUrl,
-                            })
-                          }
-                          placeholder="https://api.openai.com/v1"
-                          spellCheck={false}
-                        />
-                      </label>
-
-                      <label className="block">
-                        <span className="text-xs font-medium text-foreground">Default model</span>
-                        <Input
-                          className="mt-1.5"
-                          value={endpoint.model}
-                          onChange={(event) =>
-                            updateOpenAICompatibleEndpoint(endpoint.id, {
-                              model: event.target.value || endpoint.model,
-                            })
-                          }
-                          placeholder="gpt-4.1-mini"
-                          spellCheck={false}
-                        />
-                      </label>
-
-                      <label className="block">
-                        <span className="text-xs font-medium text-foreground">API key</span>
-                        <Input
-                          className="mt-1.5"
-                          type="password"
-                          value={endpoint.apiKey}
-                          onChange={(event) =>
-                            updateOpenAICompatibleEndpoint(endpoint.id, {
-                              apiKey: event.target.value,
-                            })
-                          }
-                          placeholder="sk-..."
-                          spellCheck={false}
-                        />
-                      </label>
-
-                      <label className="block">
-                        <span className="text-xs font-medium text-foreground">API key env var</span>
-                        <Input
-                          className="mt-1.5"
-                          value={endpoint.apiKeyEnvVar}
-                          onChange={(event) =>
-                            updateOpenAICompatibleEndpoint(endpoint.id, {
-                              apiKeyEnvVar: event.target.value,
-                            })
-                          }
-                          placeholder="OPENAI_API_KEY"
-                          spellCheck={false}
-                        />
-                      </label>
-                    </div>
-
-                    <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-                      Uses the Chat Completions compatibility path. If this endpoint is selected
-                      above, Beppo uses it for generated Git and title text only.
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
       </SettingsSection>
 
       <SettingsSection title="Advanced">
@@ -1916,18 +1525,41 @@ export function GeneralSettingsPanel() {
             description="Current version of the application."
           />
         )}
+        <SettingsRow
+          title="Diagnostics"
+          description={diagnosticsDescription}
+          status={
+            <>
+              <span className="block break-all font-mono text-[11px] text-foreground">
+                {logsDirectoryPath ?? "Resolving logs directory..."}
+              </span>
+              {openDiagnosticsError ? (
+                <span className="mt-1 block text-destructive">{openDiagnosticsError}</span>
+              ) : null}
+            </>
+          }
+          control={
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={!logsDirectoryPath || isOpeningLogsDirectory}
+              onClick={openLogsDirectory}
+            >
+              {isOpeningLogsDirectory ? "Opening..." : "Open logs folder"}
+            </Button>
+          }
+        />
       </SettingsSection>
     </SettingsPageContainer>
   );
 }
 
 export function ArchivedThreadsPanel() {
-  const projects = useStore((store) => store.projects);
-  const threads = useStore((store) => store.threads);
+  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const threads = useStore(useShallow(selectThreadShellsAcrossEnvironments));
   const { unarchiveThread, confirmAndDeleteThread } = useThreadActions();
   const archivedGroups = useMemo(() => {
-    const projectById = new Map(projects.map((project) => [project.id, project] as const));
-    return [...projectById.values()]
+    return projects
       .map((project) => ({
         project,
         threads: threads
@@ -1942,8 +1574,8 @@ export function ArchivedThreadsPanel() {
   }, [projects, threads]);
 
   const handleArchivedThreadContextMenu = useCallback(
-    async (threadId: ThreadId, position: { x: number; y: number }) => {
-      const api = readNativeApi();
+    async (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
+      const api = readLocalApi();
       if (!api) return;
       const clicked = await api.contextMenu.show(
         [
@@ -1955,7 +1587,7 @@ export function ArchivedThreadsPanel() {
 
       if (clicked === "unarchive") {
         try {
-          await unarchiveThread(threadId);
+          await unarchiveThread(threadRef);
         } catch (error) {
           toastManager.add({
             type: "error",
@@ -1967,7 +1599,7 @@ export function ArchivedThreadsPanel() {
       }
 
       if (clicked === "delete") {
-        await confirmAndDeleteThread(threadId);
+        await confirmAndDeleteThread(threadRef);
       }
     },
     [confirmAndDeleteThread, unarchiveThread],
@@ -1992,7 +1624,7 @@ export function ArchivedThreadsPanel() {
           <SettingsSection
             key={project.id}
             title={project.name}
-            icon={<ProjectFavicon cwd={project.cwd} />}
+            icon={<ProjectFavicon environmentId={project.environmentId} cwd={project.cwd} />}
           >
             {projectThreads.map((thread) => (
               <div
@@ -2000,10 +1632,13 @@ export function ArchivedThreadsPanel() {
                 className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 first:border-t-0 sm:px-5"
                 onContextMenu={(event) => {
                   event.preventDefault();
-                  void handleArchivedThreadContextMenu(thread.id, {
-                    x: event.clientX,
-                    y: event.clientY,
-                  });
+                  void handleArchivedThreadContextMenu(
+                    scopeThreadRef(thread.environmentId, thread.id),
+                    {
+                      x: event.clientX,
+                      y: event.clientY,
+                    },
+                  );
                 }}
               >
                 <div className="min-w-0 flex-1">
@@ -2020,13 +1655,16 @@ export function ArchivedThreadsPanel() {
                   size="sm"
                   className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
                   onClick={() =>
-                    void unarchiveThread(thread.id).catch((error) => {
-                      toastManager.add({
-                        type: "error",
-                        title: "Failed to unarchive thread",
-                        description: error instanceof Error ? error.message : "An error occurred.",
-                      });
-                    })
+                    void unarchiveThread(scopeThreadRef(thread.environmentId, thread.id)).catch(
+                      (error) => {
+                        toastManager.add({
+                          type: "error",
+                          title: "Failed to unarchive thread",
+                          description:
+                            error instanceof Error ? error.message : "An error occurred.",
+                        });
+                      },
+                    )
                   }
                 >
                   <ArchiveX className="size-3.5" />

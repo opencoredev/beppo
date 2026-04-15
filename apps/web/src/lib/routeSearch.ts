@@ -5,5 +5,5 @@ export function normalizeDraftThreadId(value: unknown): ThreadId | undefined {
     return undefined;
   }
   const normalized = value.trim();
-  return normalized.length > 0 ? ThreadId.makeUnsafe(normalized) : undefined;
+  return normalized.length > 0 ? (normalized as ThreadId) : undefined;
 }

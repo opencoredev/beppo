@@ -2868,7 +2868,6 @@
   },
   "fileNames": {
     "agents.md": "_f_agents",
-    "agents.txt": "_f_agents",
     "alchemy.run.ts": "_f_alchemy",
     ".all-contributorsrc": "_f_allcontributors",
     "allurerc.js": "_f_allure",
@@ -6380,7 +6379,6 @@
     },
     "fileNames": {
       "agents.md": "_f_light_agents",
-      "agents.txt": "_f_light_agents",
       "alchemy.run.ts": "_f_alchemy",
       ".all-contributorsrc": "_f_allcontributors",
       "allurerc.js": "_f_allure",

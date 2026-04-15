@@ -1155,7 +1155,7 @@ initializeLogging();
 
 const autoUpdatesEnabled = await resolveAutoUpdateEnabled();
 updateState = {
-  ...createInitialDesktopUpdateState(desktopPackageJson.version, desktopRuntimeInfo),
+  ...createInitialDesktopUpdateState(desktopPackageJson.version, desktopRuntimeInfo, "latest"),
   enabled: autoUpdatesEnabled,
   status: autoUpdatesEnabled ? "idle" : "disabled",
 };

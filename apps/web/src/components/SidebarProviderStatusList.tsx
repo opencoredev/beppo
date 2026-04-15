@@ -6,8 +6,8 @@ import {
   deriveLatestProviderRateLimitSnapshots,
   deriveRateLimitEntriesFromPayload,
 } from "../lib/rateLimits";
-import { useStore } from "../store";
-import { readNativeApi } from "../nativeApi";
+import { readLocalApi } from "../localApi";
+import { selectThreadsAcrossEnvironments, useStore } from "../store";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { ProviderIdentityIcon } from "./ProviderIdentityIcon";
 import { RateLimitSummaryList } from "./RateLimitSummaryList";
@@ -92,7 +92,7 @@ export function SidebarProviderStatusList(props: {
   readonly isLoading?: boolean;
   readonly onOpenSettings?: () => void;
 }) {
-  const threads = useStore((store) => store.threads);
+  const threads = useStore(selectThreadsAcrossEnvironments);
   const appSettings = useSettings();
   const { updateSettings } = useUpdateSettings();
   const snapshotsByProvider = useMemo(
@@ -138,14 +138,22 @@ export function SidebarProviderStatusList(props: {
       <SidebarMenu className="gap-1">
         {props.providers.map((provider) => {
           const providerEntries = deriveRateLimitEntriesFromPayload(provider.rateLimits);
-          const snapshot =
+          const providerSnapshot =
             providerEntries.length > 0
               ? {
                   provider: provider.provider,
                   updatedAt: provider.checkedAt,
                   entries: providerEntries,
                 }
-              : snapshotsByProvider.get(provider.provider);
+              : null;
+          const activitySnapshot = snapshotsByProvider.get(provider.provider);
+          const snapshot =
+            providerSnapshot && activitySnapshot
+              ? new Date(activitySnapshot.updatedAt).getTime() >
+                new Date(providerSnapshot.updatedAt).getTime()
+                ? activitySnapshot
+                : providerSnapshot
+              : (activitySnapshot ?? providerSnapshot);
           const headline = getProviderHeadline(provider);
           const HeadlineIcon = headline.icon;
           const version = formatVersion(provider.version);
@@ -161,7 +169,7 @@ export function SidebarProviderStatusList(props: {
                 className="group/provider rounded-xl border border-sidebar-border/70 bg-sidebar-accent/24 px-2.5 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]"
                 onContextMenu={(event) => {
                   event.preventDefault();
-                  const api = readNativeApi();
+                  const api = readLocalApi();
                   if (!api) {
                     return;
                   }
@@ -173,7 +181,7 @@ export function SidebarProviderStatusList(props: {
                       ],
                       { x: event.clientX, y: event.clientY },
                     )
-                    .then((clicked) => {
+                    .then((clicked: "hide" | "settings" | null) => {
                       if (clicked === "hide") {
                         updateSettings({
                           sidebarProviderVisibility: {

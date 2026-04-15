@@ -167,7 +167,13 @@ const pillars = [
 </Layout>
 
 <script>
-  import { fetchLatestRelease, RELEASES_URL, type ReleaseAsset } from "../lib/releases";
+  import {
+    fetchLatestRelease,
+    findDownloadAsset,
+    RELEASES_URL,
+    type DownloadAssetTarget,
+    type ReleaseAsset,
+  } from "../lib/releases";
 
   type Platform = { os: "mac" | "win" | "linux"; label: string; arch?: string };
 
@@ -182,15 +188,29 @@ const pillars = [
   }
 
   function pickAsset(assets: ReleaseAsset[], platform: Platform): string | null {
-    if (platform.os === "win") {
-      return assets.find((asset) => asset.name.endsWith("-x64.exe"))?.browser_download_url ?? null;
+    const target: DownloadAssetTarget =
+      platform.os === "win"
+        ? "windows-x64"
+        : platform.os === "linux"
+          ? "linux-x64"
+          : platform.arch === "x64"
+            ? "macos-x64"
+            : "macos-arm64";
+
+    const match = findDownloadAsset(assets, target);
+    if (match) {
+      return match.browser_download_url;
     }
+
     if (platform.os === "mac") {
-      const preferred = assets.find((asset) => asset.name.endsWith(`-${platform.arch}.dmg`));
-      const fallback = assets.find((asset) => asset.name.endsWith(".dmg"));
-      return (preferred ?? fallback)?.browser_download_url ?? null;
+      return (
+        findDownloadAsset(assets, "macos-arm64")?.browser_download_url ??
+        findDownloadAsset(assets, "macos-x64")?.browser_download_url ??
+        null
+      );
     }
-    return assets.find((asset) => asset.name.endsWith(".AppImage"))?.browser_download_url ?? null;
+
+    return null;
   }
 
   async function init() {

@@ -1,4 +1,8 @@
-export type OrchestrationRecoveryReason = "bootstrap" | "sequence-gap" | "replay-failed";
+export type OrchestrationRecoveryReason =
+  | "bootstrap"
+  | "sequence-gap"
+  | "resubscribe"
+  | "replay-failed";
 
 export interface OrchestrationRecoveryPhase {
   kind: "snapshot" | "replay";
@@ -13,7 +17,73 @@ export interface OrchestrationRecoveryState {
   inFlight: OrchestrationRecoveryPhase | null;
 }
 
+export interface ReplayRecoveryCompletion {
+  replayMadeProgress: boolean;
+  shouldReplay: boolean;
+}
+
+export interface ReplayRetryTracker {
+  attempts: number;
+  latestSequence: number;
+  highestObservedSequence: number;
+}
+
+export interface ReplayRetryDecision {
+  shouldRetry: boolean;
+  delayMs: number;
+  tracker: ReplayRetryTracker | null;
+}
+
 type SequencedEvent = Readonly<{ sequence: number }>;
+
+export function deriveReplayRetryDecision(input: {
+  previousTracker: ReplayRetryTracker | null;
+  completion: ReplayRecoveryCompletion;
+  recoveryState: Pick<OrchestrationRecoveryState, "latestSequence" | "highestObservedSequence">;
+  baseDelayMs: number;
+  maxNoProgressRetries: number;
+}): ReplayRetryDecision {
+  if (!input.completion.shouldReplay) {
+    return {
+      shouldRetry: false,
+      delayMs: 0,
+      tracker: null,
+    };
+  }
+
+  if (input.completion.replayMadeProgress) {
+    return {
+      shouldRetry: true,
+      delayMs: 0,
+      tracker: null,
+    };
+  }
+
+  const previousTracker = input.previousTracker;
+  const sameFrontier =
+    previousTracker !== null &&
+    previousTracker.latestSequence === input.recoveryState.latestSequence &&
+    previousTracker.highestObservedSequence === input.recoveryState.highestObservedSequence;
+
+  const attempts = sameFrontier && previousTracker !== null ? previousTracker.attempts + 1 : 1;
+  if (attempts > input.maxNoProgressRetries) {
+    return {
+      shouldRetry: false,
+      delayMs: 0,
+      tracker: null,
+    };
+  }
+
+  return {
+    shouldRetry: true,
+    delayMs: input.baseDelayMs * 2 ** (attempts - 1),
+    tracker: {
+      attempts,
+      latestSequence: input.recoveryState.latestSequence,
+      highestObservedSequence: input.recoveryState.highestObservedSequence,
+    },
+  };
+}
 
 export function createOrchestrationRecoveryCoordinator() {
   let state: OrchestrationRecoveryState = {
@@ -34,11 +104,16 @@ export function createOrchestrationRecoveryCoordinator() {
     state.highestObservedSequence = Math.max(state.highestObservedSequence, sequence);
   };
 
-  const shouldReplayAfterRecovery = (): boolean => {
-    const shouldReplay =
-      state.pendingReplay || state.highestObservedSequence > state.latestSequence;
+  const resolveReplayNeedAfterRecovery = () => {
+    const pendingReplayBeforeReset = state.pendingReplay;
+    const observedAhead = state.highestObservedSequence > state.latestSequence;
+    const shouldReplay = pendingReplayBeforeReset || observedAhead;
     state.pendingReplay = false;
-    return shouldReplay;
+    return {
+      shouldReplay,
+      pendingReplayBeforeReset,
+      observedAhead,
+    };
   };
 
   return {
@@ -93,7 +168,7 @@ export function createOrchestrationRecoveryCoordinator() {
       state.highestObservedSequence = Math.max(state.highestObservedSequence, state.latestSequence);
       state.bootstrapped = true;
       state.inFlight = null;
-      return shouldReplayAfterRecovery();
+      return resolveReplayNeedAfterRecovery().shouldReplay;
     },
 
     failSnapshotRecovery(): void {
@@ -115,16 +190,16 @@ export function createOrchestrationRecoveryCoordinator() {
       return true;
     },
 
-    completeReplayRecovery(): boolean {
+    completeReplayRecovery(): ReplayRecoveryCompletion {
       const replayMadeProgress =
         replayStartSequence !== null && state.latestSequence > replayStartSequence;
       replayStartSequence = null;
       state.inFlight = null;
-      if (!replayMadeProgress) {
-        state.pendingReplay = false;
-        return false;
-      }
-      return shouldReplayAfterRecovery();
+      const replayResolution = resolveReplayNeedAfterRecovery();
+      return {
+        replayMadeProgress,
+        shouldReplay: replayResolution.shouldReplay,
+      };
     },
 
     failReplayRecovery(): void {

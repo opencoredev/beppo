@@ -11,13 +11,15 @@ import {
   type ServerSettings,
 } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
+import { useCallback, useRef } from "react";
 
-import type { WsRpcClient } from "../wsRpcClient";
+import type { WsRpcClient } from "./wsRpcClient";
 import { appAtomRegistry, resetAppAtomRegistryForTests } from "./atomRegistry";
 
 export type ServerConfigUpdateSource = ServerConfigStreamEvent["type"];
 
 export interface ServerConfigUpdatedNotification {
+  readonly id: number;
   readonly payload: ServerConfigUpdatedPayload;
   readonly source: ServerConfigUpdateSource;
 }
@@ -48,6 +50,7 @@ const selectAvailableEditors = (config: ServerConfig | null): ReadonlyArray<Edit
 const selectKeybindings = (config: ServerConfig | null) => config?.keybindings ?? EMPTY_KEYBINDINGS;
 const selectKeybindingsConfigPath = (config: ServerConfig | null) =>
   config?.keybindingsConfigPath ?? null;
+const selectObservability = (config: ServerConfig | null) => config?.observability ?? null;
 const selectProviders = (config: ServerConfig | null) =>
   config?.providers ?? EMPTY_SERVER_PROVIDERS;
 const selectSettings = (config: ServerConfig | null): ServerSettings =>
@@ -69,6 +72,10 @@ export const providersUpdatedAtom = makeStateAtom<ServerProviderUpdatedPayload |
 
 export function getServerConfig(): ServerConfig | null {
   return appAtomRegistry.get(serverConfigAtom);
+}
+
+export function getServerConfigUpdatedNotification(): ServerConfigUpdatedNotification | null {
+  return appAtomRegistry.get(serverConfigUpdatedAtom);
 }
 
 export function setServerConfigSnapshot(config: ServerConfig): void {
@@ -194,7 +201,10 @@ export function startServerStateSync(client: ServerStateClient): () => void {
 
 export function resetServerStateForTests() {
   resetAppAtomRegistryForTests();
+  nextServerConfigUpdatedNotificationId = 1;
 }
+
+let nextServerConfigUpdatedNotificationId = 1;
 
 function resolveServerConfig(config: ServerConfig): void {
   appAtomRegistry.set(serverConfigAtom, config);
@@ -208,7 +218,11 @@ function emitServerConfigUpdated(
   payload: ServerConfigUpdatedPayload,
   source: ServerConfigUpdateSource,
 ): void {
-  appAtomRegistry.set(serverConfigUpdatedAtom, { payload, source });
+  appAtomRegistry.set(serverConfigUpdatedAtom, {
+    id: nextServerConfigUpdatedNotificationId++,
+    payload,
+    source,
+  });
 }
 
 function subscribeLatest<A>(
@@ -230,17 +244,18 @@ function subscribeLatest<A>(
 function useLatestAtomSubscription<A>(
   atom: Atom.Atom<A | null>,
   listener: (value: NonNullable<A>) => void,
-) {
-  useAtomSubscribe(
-    atom,
-    (value) => {
-      if (value === null) {
-        return;
-      }
-      listener(value as NonNullable<A>);
-    },
-    { immediate: true },
-  );
+): void {
+  const listenerRef = useRef(listener);
+  listenerRef.current = listener;
+
+  const stableListener = useCallback((value: A | null) => {
+    if (value === null) {
+      return;
+    }
+    listenerRef.current(value as NonNullable<A>);
+  }, []);
+
+  useAtomSubscribe(atom, stableListener, { immediate: true });
 }
 
 export function useServerConfig(): ServerConfig | null {
@@ -265,6 +280,10 @@ export function useServerAvailableEditors(): ReadonlyArray<EditorId> {
 
 export function useServerKeybindingsConfigPath(): string | null {
   return useAtomValue(serverConfigAtom, selectKeybindingsConfigPath);
+}
+
+export function useServerObservability(): ServerConfig["observability"] | null {
+  return useAtomValue(serverConfigAtom, selectObservability);
 }
 
 export function useServerWelcomeSubscription(

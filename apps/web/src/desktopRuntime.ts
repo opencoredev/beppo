@@ -16,11 +16,6 @@ function readSearchParam(name: string): string | null {
 export function getDesktopWsUrl(): string | null {
   if (typeof window === "undefined") return null;
 
-  const bridgeWsUrl = window.desktopBridge?.getWsUrl?.()?.trim();
-  if (bridgeWsUrl) {
-    return bridgeWsUrl;
-  }
-
   return (
     readSearchParam(DESKTOP_WS_URL_SEARCH_PARAM) ??
     readSearchParam(LEGACY_DESKTOP_WS_URL_SEARCH_PARAM)

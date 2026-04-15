@@ -21,7 +21,6 @@ import {
 import { ClaudeAI, CursorIcon, Gemini, Icon, OpenAI, OpenCodeIcon } from "../Icons";
 import { cn } from "~/lib/utils";
 import { getProviderSnapshot } from "../../providerModels";
-import { providerIconClassName, providerIconStyle } from "../ProviderIdentityIcon";
 
 function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): option is {
   value: ProviderKind;
@@ -43,6 +42,13 @@ const COMING_SOON_PROVIDER_OPTIONS = [
   { id: "opencode", label: "OpenCode", icon: OpenCodeIcon },
   { id: "gemini", label: "Gemini", icon: Gemini },
 ] as const;
+
+function providerIconClassName(
+  provider: ProviderKind | ProviderPickerKind,
+  fallbackClassName: string,
+): string {
+  return provider === "claudeAgent" ? "text-[#d97757]" : fallbackClassName;
+}
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   provider: ProviderKind;
@@ -93,9 +99,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             size="sm"
             variant={props.triggerVariant ?? "ghost"}
             data-chat-provider-model-picker="true"
-            data-provider={activeProvider}
             className={cn(
-              "provider-picker-trigger min-w-0 justify-start overflow-hidden whitespace-nowrap px-2 text-muted-foreground/78 hover:text-foreground/88 [&_svg]:mx-0",
+              "min-w-0 justify-start overflow-hidden whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 [&_svg]:mx-0",
               props.compact ? "max-w-42 shrink-0" : "max-w-48 shrink sm:max-w-56 sm:px-3",
               props.triggerClassName,
             )}
@@ -112,11 +117,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           <ProviderIcon
             aria-hidden="true"
             className={cn(
-              "provider-picker-trigger-icon size-4 shrink-0",
-              providerIconClassName(activeProvider),
+              "size-4 shrink-0",
+              providerIconClassName(activeProvider, "text-muted-foreground/70"),
               props.activeProviderIconClassName,
             )}
-            style={providerIconStyle(activeProvider)}
           />
           <span className="min-w-0 flex-1 truncate">{selectedModelLabel}</span>
           <ChevronDownIcon aria-hidden="true" className="size-3 shrink-0 opacity-60" />
@@ -159,10 +163,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                       aria-hidden="true"
                       className={cn(
                         "size-4 shrink-0 opacity-80",
-                        "provider-picker-menu-icon",
-                        providerIconClassName(option.value),
+                        providerIconClassName(option.value, "text-muted-foreground/85"),
                       )}
-                      style={providerIconStyle(option.value)}
                     />
                     <span>{option.label}</span>
                     <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">
@@ -178,10 +180,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                       aria-hidden="true"
                       className={cn(
                         "size-4 shrink-0",
-                        "provider-picker-menu-icon",
-                        providerIconClassName(option.value),
+                        providerIconClassName(option.value, "text-muted-foreground/85"),
                       )}
-                      style={providerIconStyle(option.value)}
                     />
                     {option.label}
                   </MenuSubTrigger>
@@ -213,11 +213,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 <MenuItem key={option.value} disabled>
                   <OptionIcon
                     aria-hidden="true"
-                    className={cn(
-                      "provider-picker-menu-icon size-4 shrink-0 opacity-80",
-                      providerIconClassName(option.value),
-                    )}
-                    style={providerIconStyle(option.value)}
+                    className="size-4 shrink-0 text-muted-foreground/85 opacity-80"
                   />
                   <span>{option.label}</span>
                   <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">
@@ -231,14 +227,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               const OptionIcon = option.icon;
               return (
                 <MenuItem key={option.id} disabled>
-                  <OptionIcon
-                    aria-hidden="true"
-                    className={cn(
-                      "provider-picker-menu-icon size-4 shrink-0 opacity-80",
-                      providerIconClassName(option.id),
-                    )}
-                    style={providerIconStyle(option.id)}
-                  />
+                  <OptionIcon aria-hidden="true" className="size-4 shrink-0 opacity-80" />
                   <span>{option.label}</span>
                   <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">
                     Coming soon

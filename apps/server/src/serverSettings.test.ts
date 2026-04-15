@@ -170,6 +170,26 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("trims observability settings when updates are applied", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+
+      const next = yield* serverSettings.updateSettings({
+        addProjectBaseDirectory: "  ~/Development  ",
+        observability: {
+          otlpTracesUrl: "  http://localhost:4318/v1/traces  ",
+          otlpMetricsUrl: "  http://localhost:4318/v1/metrics  ",
+        },
+      });
+
+      assert.equal(next.addProjectBaseDirectory, "~/Development");
+      assert.deepEqual(next.observability, {
+        otlpTracesUrl: "http://localhost:4318/v1/traces",
+        otlpMetricsUrl: "http://localhost:4318/v1/metrics",
+      });
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("defaults blank binary paths to provider executables", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;
@@ -195,6 +215,11 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const serverConfig = yield* ServerConfig;
       const fileSystem = yield* FileSystem.FileSystem;
       const next = yield* serverSettings.updateSettings({
+        addProjectBaseDirectory: "~/Development",
+        observability: {
+          otlpTracesUrl: "http://localhost:4318/v1/traces",
+          otlpMetricsUrl: "http://localhost:4318/v1/metrics",
+        },
         providers: {
           codex: {
             binaryPath: "/opt/homebrew/bin/codex",
@@ -206,6 +231,11 @@ it.layer(NodeServices.layer)("server settings", (it) => {
 
       const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
       assert.deepEqual(JSON.parse(raw), {
+        addProjectBaseDirectory: "~/Development",
+        observability: {
+          otlpTracesUrl: "http://localhost:4318/v1/traces",
+          otlpMetricsUrl: "http://localhost:4318/v1/metrics",
+        },
         providers: {
           codex: {
             binaryPath: "/opt/homebrew/bin/codex",

@@ -33,10 +33,11 @@ describe("perf guardrail fixtures", () => {
       threadsPerProject: 2,
       eventsPerThread: 3,
     });
+    const environmentState = Object.values(fixture.initialState.environmentStateById)[0];
 
     expect(fixture.threadCount).toBe(2);
     expect(fixture.eventCount).toBe(6);
-    expect(fixture.initialState.threads).toHaveLength(2);
+    expect(environmentState?.threadIds).toHaveLength(2);
     expect(fixture.events[0]?.type).toBe("thread.message-sent");
   });
 

@@ -11,7 +11,7 @@ import { accessSync, constants, statSync } from "node:fs";
 import { extname, join } from "node:path";
 
 import { EDITORS, OpenError, type EditorId } from "@t3tools/contracts";
-import { ServiceMap, Effect, Layer } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { toWindowsEditorPath } from "./wsl";
 
 // ==============================
@@ -35,10 +35,65 @@ interface CommandAvailabilityOptions {
   readonly env?: NodeJS.ProcessEnv;
 }
 
-const LINE_COLUMN_SUFFIX_PATTERN = /:\d+(?::\d+)?$/;
+const TARGET_WITH_POSITION_PATTERN = /^(.*?):(\d+)(?::(\d+))?$/;
 
-function shouldUseGotoFlag(editor: (typeof EDITORS)[number], target: string): boolean {
-  return editor.supportsGoto && LINE_COLUMN_SUFFIX_PATTERN.test(target);
+function parseTargetPathAndPosition(target: string): {
+  path: string;
+  line: string | undefined;
+  column: string | undefined;
+} | null {
+  const match = TARGET_WITH_POSITION_PATTERN.exec(target);
+  if (!match?.[1] || !match[2]) {
+    return null;
+  }
+
+  return {
+    path: match[1],
+    line: match[2],
+    column: match[3],
+  };
+}
+
+function resolveCommandEditorArgs(
+  editor: (typeof EDITORS)[number],
+  target: string,
+): ReadonlyArray<string> {
+  const parsedTarget = parseTargetPathAndPosition(target);
+
+  switch (editor.launchStyle) {
+    case "direct-path":
+      return [target];
+    case "goto":
+      return parsedTarget ? ["--goto", target] : [target];
+    case "line-column": {
+      if (!parsedTarget) {
+        return [target];
+      }
+
+      const { path, line, column } = parsedTarget;
+      return [...(line ? ["--line", line] : []), ...(column ? ["--column", column] : []), path];
+    }
+  }
+}
+
+function resolveEditorArgs(
+  editor: (typeof EDITORS)[number],
+  target: string,
+): ReadonlyArray<string> {
+  const baseArgs = "baseArgs" in editor ? editor.baseArgs : [];
+  return [...baseArgs, ...resolveCommandEditorArgs(editor, target)];
+}
+
+function resolveAvailableCommand(
+  commands: ReadonlyArray<string>,
+  options: CommandAvailabilityOptions = {},
+): string | null {
+  for (const command of commands) {
+    if (isCommandAvailable(command, options)) {
+      return command;
+    }
+  }
+  return null;
 }
 
 function fileManagerCommandForPlatform(platform: NodeJS.Platform): string {
@@ -179,8 +234,16 @@ export function resolveAvailableEditors(
   const available: EditorId[] = [];
 
   for (const editor of EDITORS) {
-    const command = editor.command ?? fileManagerCommandForPlatform(platform);
-    if (isCommandAvailable(command, { platform, env })) {
+    if (editor.commands === null) {
+      const command = fileManagerCommandForPlatform(platform);
+      if (isCommandAvailable(command, { platform, env })) {
+        available.push(editor.id);
+      }
+      continue;
+    }
+
+    const command = resolveAvailableCommand(editor.commands, { platform, env });
+    if (command !== null) {
       available.push(editor.id);
     }
   }
@@ -208,32 +271,42 @@ export interface OpenShape {
 /**
  * Open - Service tag for browser/editor launch operations.
  */
-export class Open extends ServiceMap.Service<Open, OpenShape>()("t3/open") {}
+export class Open extends Context.Service<Open, OpenShape>()("t3/open") {}
 
 // ==============================
 // Implementations
 // ==============================
 
-export const resolveEditorLaunch = Effect.fnUntraced(function* (
+export const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
   input: OpenInEditorInput,
   platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
 ): Effect.fn.Return<EditorLaunch, OpenError> {
-  const resolvedTarget = platform === "win32" ? toWindowsEditorPath(input.cwd) : input.cwd;
+  yield* Effect.annotateCurrentSpan({
+    "open.editor": input.editor,
+    "open.cwd": input.cwd,
+    "open.platform": platform,
+  });
   const editorDef = EDITORS.find((editor) => editor.id === input.editor);
   if (!editorDef) {
     return yield* new OpenError({ message: `Unknown editor: ${input.editor}` });
   }
 
-  if (editorDef.command) {
-    return shouldUseGotoFlag(editorDef, resolvedTarget)
-      ? { command: editorDef.command, args: ["--goto", resolvedTarget] }
-      : { command: editorDef.command, args: [resolvedTarget] };
+  if (editorDef.commands) {
+    const resolvedTarget = platform === "win32" ? toWindowsEditorPath(input.cwd) : input.cwd;
+    const command =
+      resolveAvailableCommand(editorDef.commands, { platform, env }) ?? editorDef.commands[0];
+    return {
+      command,
+      args: resolveEditorArgs(editorDef, resolvedTarget),
+    };
   }
 
   if (editorDef.id !== "file-manager") {
     return yield* new OpenError({ message: `Unsupported editor: ${input.editor}` });
   }
 
+  const resolvedTarget = platform === "win32" ? toWindowsEditorPath(input.cwd) : input.cwd;
   return { command: fileManagerCommandForPlatform(platform), args: [resolvedTarget] };
 });
 
@@ -247,10 +320,16 @@ export const launchDetached = (launch: EditorLaunch) =>
     yield* Effect.callback<void, OpenError>((resume) => {
       let child;
       try {
-        child = spawn(resolvedPath, [...launch.args], {
-          detached: true,
-          stdio: "ignore",
-        });
+        const isWin32 = process.platform === "win32";
+        child = spawn(
+          launch.command,
+          isWin32 ? launch.args.map((a) => `"${a}"`) : [...launch.args],
+          {
+            detached: true,
+            stdio: "ignore",
+            shell: isWin32,
+          },
+        );
       } catch (error) {
         return resume(
           Effect.fail(new OpenError({ message: "failed to spawn detached process", cause: error })),

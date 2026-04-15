@@ -7,9 +7,11 @@ import { performance } from "node:perf_hooks";
 
 import {
   CheckpointRef,
+  EnvironmentId,
   EventId,
   MessageId,
   ProjectId,
+  type OrchestrationShellSnapshot,
   ThreadId,
   TurnId,
   type OrchestrationEvent,
@@ -18,8 +20,11 @@ import {
 
 import {
   applyOrchestrationEvents,
-  syncServerReadModel,
   type AppState,
+  setActiveEnvironmentId,
+  selectEnvironmentState,
+  syncServerShellSnapshot,
+  syncServerThreadDetail,
 } from "../apps/web/src/store.ts";
 import { useTerminalStateStore } from "../apps/web/src/terminalStateStore.ts";
 
@@ -54,6 +59,7 @@ const terminalBenchmarkFixture = {
   terminalsPerThread: 6,
   maxDurationMs: 525,
 } as const;
+const perfEnvironmentId = EnvironmentId.make("perf-environment");
 
 type CheckName = "web-bundle" | "snapshot" | "replay" | "stream" | "terminal";
 
@@ -74,12 +80,8 @@ interface FixtureRunResult {
 
 function createEmptyAppState(): AppState {
   return {
-    projects: [],
-    threads: [],
-    sidebarThreadsById: {},
-    threadIdsByProjectId: {},
-    hydratedThreadIds: {},
-    bootstrapComplete: false,
+    activeEnvironmentId: null,
+    environmentStateById: {},
   };
 }
 
@@ -116,6 +118,65 @@ function buildIsoTime(offsetSeconds: number): string {
   return new Date(Date.UTC(2026, 1, 27, 0, 0, offsetSeconds)).toISOString();
 }
 
+function makePerfThreadRef(threadId: ThreadId): {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+} {
+  return {
+    environmentId: perfEnvironmentId,
+    threadId,
+  };
+}
+
+function makePerfThreadKey(threadId: ThreadId): string {
+  return `${perfEnvironmentId}:${threadId}`;
+}
+
+function buildShellSnapshotFixture(readModel: OrchestrationReadModel): OrchestrationShellSnapshot {
+  return {
+    snapshotSequence: readModel.snapshotSequence,
+    projects: readModel.projects.map((project) => ({
+      id: project.id,
+      title: project.title,
+      workspaceRoot: project.workspaceRoot,
+      repositoryIdentity: project.repositoryIdentity ?? null,
+      defaultModelSelection: project.defaultModelSelection,
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt,
+    })),
+    threads: readModel.threads.map((thread) => ({
+      id: thread.id,
+      projectId: thread.projectId,
+      title: thread.title,
+      modelSelection: thread.modelSelection,
+      runtimeMode: thread.runtimeMode,
+      interactionMode: thread.interactionMode,
+      branch: thread.branch,
+      worktreePath: thread.worktreePath,
+      latestTurn: thread.latestTurn,
+      createdAt: thread.createdAt,
+      updatedAt: thread.updatedAt,
+      archivedAt: thread.archivedAt,
+      session: thread.session,
+      latestUserMessageAt: null,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      hasActionableProposedPlan: false,
+    })),
+    updatedAt: readModel.updatedAt,
+  };
+}
+
+function seedAppStateFromReadModel(readModel: OrchestrationReadModel): AppState {
+  const shellSnapshot = buildShellSnapshotFixture(readModel);
+  let state = setActiveEnvironmentId(createEmptyAppState(), perfEnvironmentId);
+  state = syncServerShellSnapshot(state, shellSnapshot, perfEnvironmentId);
+  for (const thread of readModel.threads) {
+    state = syncServerThreadDetail(state, thread, perfEnvironmentId);
+  }
+  return state;
+}
+
 function makeBaseEvent<T extends OrchestrationEvent["type"]>(
   type: T,
   payload: Extract<OrchestrationEvent, { type: T }>["payload"],
@@ -124,7 +185,7 @@ function makeBaseEvent<T extends OrchestrationEvent["type"]>(
 ): Extract<OrchestrationEvent, { type: T }> {
   return {
     sequence,
-    eventId: EventId.makeUnsafe(`perf-event-${sequence}`),
+    eventId: EventId.make(`perf-event-${sequence}`),
     aggregateKind: "thread",
     aggregateId,
     occurredAt: buildIsoTime(sequence),
@@ -172,11 +233,9 @@ function buildMessagePair(
   readonly assistantMessage: OrchestrationReadModel["threads"][number]["messages"][number];
   readonly turnId: TurnId;
 } {
-  const turnId = TurnId.makeUnsafe(`turn-${projectIndex}-${threadIndex}-${pairIndex}`);
-  const userMessageId = MessageId.makeUnsafe(
-    `message-${projectIndex}-${threadIndex}-${pairIndex}-user`,
-  );
-  const assistantMessageId = MessageId.makeUnsafe(
+  const turnId = TurnId.make(`turn-${projectIndex}-${threadIndex}-${pairIndex}`);
+  const userMessageId = MessageId.make(`message-${projectIndex}-${threadIndex}-${pairIndex}-user`);
+  const assistantMessageId = MessageId.make(
     `message-${projectIndex}-${threadIndex}-${pairIndex}-assistant`,
   );
   const baseOffset = projectIndex * 1_000 + threadIndex * 10 + pairIndex * 2;
@@ -225,7 +284,7 @@ export function buildSnapshotReadModelFixture(
   const threads: Array<OrchestrationReadModel["threads"][number]> = [];
 
   for (let projectIndex = 0; projectIndex < projectCount; projectIndex += 1) {
-    const projectId = ProjectId.makeUnsafe(`project-${projectIndex}`);
+    const projectId = ProjectId.make(`project-${projectIndex}`);
     projects.push({
       id: projectId,
       title: `Project ${projectIndex + 1}`,
@@ -241,7 +300,7 @@ export function buildSnapshotReadModelFixture(
     });
 
     for (let threadIndex = 0; threadIndex < threadsPerProject; threadIndex += 1) {
-      const threadId = ThreadId.makeUnsafe(`thread-${projectIndex}-${threadIndex}`);
+      const threadId = ThreadId.make(`thread-${projectIndex}-${threadIndex}`);
       const messagePairs = Math.max(1, Math.ceil(messagesPerThread / 2));
       const messages: Array<OrchestrationReadModel["threads"][number]["messages"][number]> = [];
       let latestAssistantMessageId: MessageId | null = null;
@@ -258,11 +317,9 @@ export function buildSnapshotReadModelFixture(
       }
 
       const checkpoints = Array.from({ length: checkpointsPerThread }, (_, checkpointIndex) => ({
-        turnId: TurnId.makeUnsafe(
-          `checkpoint-turn-${projectIndex}-${threadIndex}-${checkpointIndex}`,
-        ),
+        turnId: TurnId.make(`checkpoint-turn-${projectIndex}-${threadIndex}-${checkpointIndex}`),
         checkpointTurnCount: checkpointIndex + 1,
-        checkpointRef: CheckpointRef.makeUnsafe(
+        checkpointRef: CheckpointRef.make(
           `refs/t3/checkpoints/project-${projectIndex}/thread-${threadIndex}/${checkpointIndex + 1}`,
         ),
         status: "ready" as const,
@@ -272,7 +329,7 @@ export function buildSnapshotReadModelFixture(
       }));
 
       const activities = Array.from({ length: activitiesPerThread }, (_, activityIndex) => ({
-        id: EventId.makeUnsafe(`activity-${projectIndex}-${threadIndex}-${activityIndex}`),
+        id: EventId.make(`activity-${projectIndex}-${threadIndex}-${activityIndex}`),
         tone: "info" as const,
         kind: "perf.activity",
         summary: `Activity ${activityIndex + 1}`,
@@ -419,16 +476,16 @@ export function buildReplayFixture(
     activitiesPerThread: 1,
     checkpointsPerThread: 1,
   });
-  const initialState = syncServerReadModel(createEmptyAppState(), snapshot);
+  const initialState = seedAppStateFromReadModel(snapshot);
   const events: OrchestrationEvent[] = [];
   let sequence = 1;
 
   for (const thread of snapshot.threads) {
     for (let eventIndex = 0; eventIndex < eventsPerThread; eventIndex += 1) {
       const isAssistant = eventIndex % 2 === 1;
-      const messageId = MessageId.makeUnsafe(`replay-message-${thread.id}-${eventIndex}`);
+      const messageId = MessageId.make(`replay-message-${thread.id}-${eventIndex}`);
       const turnId = isAssistant
-        ? TurnId.makeUnsafe(`replay-turn-${thread.id}-${Math.floor(eventIndex / 2)}`)
+        ? TurnId.make(`replay-turn-${thread.id}-${Math.floor(eventIndex / 2)}`)
         : null;
 
       events.push(
@@ -487,16 +544,16 @@ export function buildStreamingTurnFixture(
     throw new Error("Streaming fixture failed to create a thread.");
   }
 
-  const initialState = syncServerReadModel(createEmptyAppState(), snapshot);
-  const turnId = TurnId.makeUnsafe(`stream-turn-${thread.id}`);
-  const assistantMessageId = MessageId.makeUnsafe(`stream-message-${thread.id}`);
+  const initialState = seedAppStateFromReadModel(snapshot);
+  const turnId = TurnId.make(`stream-turn-${thread.id}`);
+  const assistantMessageId = MessageId.make(`stream-message-${thread.id}`);
   const chunk = "x".repeat(chunkSize);
   const events: OrchestrationEvent[] = [
     makeBaseEvent(
       "thread.message-sent",
       {
         threadId: thread.id,
-        messageId: MessageId.makeUnsafe(`stream-user-${thread.id}`),
+        messageId: MessageId.make(`stream-user-${thread.id}`),
         role: "user",
         text: "Give me a long streamed answer.",
         turnId: null,
@@ -595,19 +652,23 @@ function runWebBundleCheck(): FixtureRunResult {
 
 function runSnapshotBootstrapCheck(): FixtureRunResult {
   const readModel = buildSnapshotReadModelFixture(snapshotBenchmarkFixture);
-  const initialState = createEmptyAppState();
   const startedAt = performance.now();
-  const nextState = syncServerReadModel(initialState, readModel);
+  const nextState = seedAppStateFromReadModel(readModel);
   const durationMs = performance.now() - startedAt;
 
-  assertCondition(nextState.bootstrapComplete, "Snapshot bootstrap did not complete.");
+  const environmentState = selectEnvironmentState(nextState, perfEnvironmentId);
   assertCondition(
-    nextState.projects.length === readModel.projects.length,
-    `Snapshot bootstrap projected ${nextState.projects.length} projects, expected ${readModel.projects.length}.`,
+    nextState.activeEnvironmentId === perfEnvironmentId,
+    "Snapshot bootstrap did not set the active environment.",
+  );
+  assertCondition(environmentState.bootstrapComplete, "Snapshot bootstrap did not complete.");
+  assertCondition(
+    environmentState.projectIds.length === readModel.projects.length,
+    `Snapshot bootstrap projected ${environmentState.projectIds.length} projects, expected ${readModel.projects.length}.`,
   );
   assertCondition(
-    nextState.threads.length === readModel.threads.length,
-    `Snapshot bootstrap projected ${nextState.threads.length} threads, expected ${readModel.threads.length}.`,
+    environmentState.threadIds.length === readModel.threads.length,
+    `Snapshot bootstrap projected ${environmentState.threadIds.length} threads, expected ${readModel.threads.length}.`,
   );
   assertCondition(
     durationMs <= snapshotBenchmarkFixture.maxDurationMs,
@@ -616,19 +677,24 @@ function runSnapshotBootstrapCheck(): FixtureRunResult {
 
   return {
     durationMs,
-    summary: `${formatCount(nextState.projects.length)} projects, ${formatCount(nextState.threads.length)} threads`,
+    summary: `${formatCount(environmentState.projectIds.length)} projects, ${formatCount(environmentState.threadIds.length)} threads`,
   };
 }
 
 function runReplayThroughputCheck(): FixtureRunResult {
   const fixture = buildReplayFixture(replayBenchmarkFixture);
   const startedAt = performance.now();
-  const nextState = applyOrchestrationEvents(fixture.initialState, fixture.events);
+  const nextState = applyOrchestrationEvents(
+    fixture.initialState,
+    fixture.events,
+    perfEnvironmentId,
+  );
   const durationMs = performance.now() - startedAt;
+  const environmentState = selectEnvironmentState(nextState, perfEnvironmentId);
 
   assertCondition(
-    nextState.threads.length === fixture.threadCount,
-    `Replay changed the thread count from ${fixture.threadCount} to ${nextState.threads.length}.`,
+    environmentState.threadIds.length === fixture.threadCount,
+    `Replay changed the thread count from ${fixture.threadCount} to ${environmentState.threadIds.length}.`,
   );
   assertCondition(
     durationMs <= replayBenchmarkFixture.maxDurationMs,
@@ -644,13 +710,23 @@ function runReplayThroughputCheck(): FixtureRunResult {
 function runStreamingTurnCheck(): FixtureRunResult {
   const fixture = buildStreamingTurnFixture(streamingBenchmarkFixture);
   const startedAt = performance.now();
-  const nextState = applyOrchestrationEvents(fixture.initialState, fixture.events);
-  const durationMs = performance.now() - startedAt;
-  const thread = nextState.threads[0];
-  const assistantMessage = thread?.messages.find((message) =>
-    message.id.includes("stream-message"),
+  const nextState = applyOrchestrationEvents(
+    fixture.initialState,
+    fixture.events,
+    perfEnvironmentId,
   );
+  const durationMs = performance.now() - startedAt;
+  const environmentState = selectEnvironmentState(nextState, perfEnvironmentId);
+  const threadId = environmentState.threadIds[0];
+  const messages = threadId
+    ? (environmentState.messageIdsByThreadId[threadId] ?? []).flatMap((messageId) => {
+        const message = environmentState.messageByThreadId[threadId]?.[messageId];
+        return message ? [message] : [];
+      })
+    : [];
+  const assistantMessage = messages.find((message) => message.id.includes("stream-message"));
 
+  assertCondition(threadId !== undefined, "Streaming fixture did not preserve the thread.");
   assertCondition(
     assistantMessage !== undefined,
     "Streaming fixture did not produce the assistant message.",
@@ -676,25 +752,33 @@ function runStreamingTurnCheck(): FixtureRunResult {
 
 function runTerminalScaleCheck(): FixtureRunResult {
   useTerminalStateStore.persist.clearStorage();
-  useTerminalStateStore.setState({ terminalStateByThreadId: {} });
+  useTerminalStateStore.setState({
+    terminalStateByThreadKey: {},
+    terminalLaunchContextByThreadKey: {},
+    terminalEventEntriesByKey: {},
+    nextTerminalEventId: 0,
+  });
 
   const store = useTerminalStateStore.getState();
   const threadIds = Array.from({ length: terminalBenchmarkFixture.threadCount }, (_, index) =>
-    ThreadId.makeUnsafe(`terminal-thread-${index}`),
+    ThreadId.make(`terminal-thread-${index}`),
   );
   const totalTerminals =
     terminalBenchmarkFixture.threadCount * terminalBenchmarkFixture.terminalsPerThread;
-  const keptThreadIds = new Set<ThreadId>(threadIds.filter((_, index) => index % 2 === 0));
+  const threadRefs = threadIds.map(makePerfThreadRef);
+  const keptThreadKeys = new Set(
+    threadIds.filter((_, index) => index % 2 === 0).map((threadId) => makePerfThreadKey(threadId)),
+  );
 
   const startedAt = performance.now();
-  for (let threadIndex = 0; threadIndex < threadIds.length; threadIndex += 1) {
-    const threadId = threadIds[threadIndex];
-    if (!threadId) {
+  for (let threadIndex = 0; threadIndex < threadRefs.length; threadIndex += 1) {
+    const threadRef = threadRefs[threadIndex];
+    if (!threadRef) {
       continue;
     }
 
-    store.setTerminalOpen(threadId, true);
-    store.setTerminalHeight(threadId, 280 + (threadIndex % 3) * 10);
+    store.setTerminalOpen(threadRef, true);
+    store.setTerminalHeight(threadRef, 280 + (threadIndex % 3) * 10);
 
     for (
       let terminalIndex = 1;
@@ -703,29 +787,29 @@ function runTerminalScaleCheck(): FixtureRunResult {
     ) {
       const terminalId = `terminal-${threadIndex}-${terminalIndex}`;
       if (terminalIndex % 2 === 0) {
-        store.splitTerminal(threadId, terminalId);
+        store.splitTerminal(threadRef, terminalId);
       } else {
-        store.newTerminal(threadId, terminalId);
+        store.newTerminal(threadRef, terminalId);
       }
-      store.setTerminalActivity(threadId, terminalId, terminalIndex % 3 === 0);
+      store.setTerminalActivity(threadRef, terminalId, terminalIndex % 3 === 0);
     }
 
     if (threadIndex % 5 === 0) {
       store.closeTerminal(
-        threadId,
+        threadRef,
         `terminal-${threadIndex}-${terminalBenchmarkFixture.terminalsPerThread - 1}`,
       );
     }
   }
-  store.removeOrphanedTerminalStates(keptThreadIds);
+  store.removeOrphanedTerminalStates(keptThreadKeys);
   const durationMs = performance.now() - startedAt;
 
   const terminalStateCount = Object.keys(
-    useTerminalStateStore.getState().terminalStateByThreadId,
+    useTerminalStateStore.getState().terminalStateByThreadKey,
   ).length;
   assertCondition(
-    terminalStateCount === keptThreadIds.size,
-    `Terminal scale fixture kept ${terminalStateCount} thread states, expected ${keptThreadIds.size}.`,
+    terminalStateCount === keptThreadKeys.size,
+    `Terminal scale fixture kept ${terminalStateCount} thread states, expected ${keptThreadKeys.size}.`,
   );
   assertCondition(
     durationMs <= terminalBenchmarkFixture.maxDurationMs,
@@ -733,7 +817,12 @@ function runTerminalScaleCheck(): FixtureRunResult {
   );
 
   useTerminalStateStore.persist.clearStorage();
-  useTerminalStateStore.setState({ terminalStateByThreadId: {} });
+  useTerminalStateStore.setState({
+    terminalStateByThreadKey: {},
+    terminalLaunchContextByThreadKey: {},
+    terminalEventEntriesByKey: {},
+    nextTerminalEventId: 0,
+  });
 
   return {
     durationMs,

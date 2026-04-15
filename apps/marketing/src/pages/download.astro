@@ -1,10 +1,6 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import {
-  DISCORD_URL,
-  RELEASES_URL,
-  REPO_URL,
-} from "../lib/releases";
+import { DISCORD_URL, RELEASES_URL, REPO_URL } from "../lib/releases";
 ---
 
 <Layout
@@ -52,13 +48,13 @@ import {
         </div>
       </div>
       <div class="download-cards">
-        <a class="download-card" data-asset="arm64.dmg" href={RELEASES_URL}>
-          <span class="card-title">Apple Silicon</span>
-          <span class="card-meta">arm64 .dmg</span>
+        <a class="download-card" data-asset="macos-arm64" href={RELEASES_URL}>
+          <span class="card-arch">Apple Silicon (arm64)</span>
+          <span class="card-format">.dmg</span>
         </a>
-        <a class="download-card" data-asset="x64.dmg" href={RELEASES_URL}>
-          <span class="card-title">Intel Mac</span>
-          <span class="card-meta">x64 .dmg</span>
+        <a class="download-card" data-asset="macos-x64" href={RELEASES_URL}>
+          <span class="card-arch">Intel (x64)</span>
+          <span class="card-format">.dmg</span>
         </a>
       </div>
     </article>
@@ -71,10 +67,10 @@ import {
           <p>Installer build for current Windows machines.</p>
         </div>
       </div>
-      <div class="download-cards single">
-        <a class="download-card" data-asset="x64.exe" href={RELEASES_URL}>
-          <span class="card-title">Windows installer</span>
-          <span class="card-meta">x64 .exe</span>
+      <div class="download-cards">
+        <a class="download-card" data-asset="windows-x64" href={RELEASES_URL}>
+          <span class="card-arch">Windows 10, 11</span>
+          <span class="card-format">.exe</span>
         </a>
       </div>
     </article>
@@ -87,10 +83,10 @@ import {
           <p>Portable AppImage build for current desktop distributions.</p>
         </div>
       </div>
-      <div class="download-cards single">
-        <a class="download-card" data-asset="x86_64.AppImage" href={RELEASES_URL}>
-          <span class="card-title">Linux AppImage</span>
-          <span class="card-meta">x86_64 .AppImage</span>
+      <div class="download-cards">
+        <a class="download-card" data-asset="linux-x64" href={RELEASES_URL}>
+          <span class="card-arch">x86_64</span>
+          <span class="card-format">AppImage</span>
         </a>
       </div>
     </article>
@@ -133,7 +129,7 @@ import {
 </Layout>
 
 <script>
-  import { fetchLatestRelease, RELEASES_URL } from "../lib/releases";
+  import { fetchLatestRelease, findDownloadAsset, RELEASES_URL } from "../lib/releases";
 
   async function init() {
     const versionLabel = document.getElementById("version-label");
@@ -156,7 +152,9 @@ import {
         const suffix = card.dataset.asset;
         if (!suffix) return;
 
-        const match = (release.assets ?? []).find((asset) => asset.name.endsWith(`-${suffix}`));
+        const match = findDownloadAsset(release.assets ?? [], suffix as Parameters<
+          typeof findDownloadAsset
+        >[1]);
         card.href = match?.browser_download_url ?? RELEASES_URL;
       });
     } catch {

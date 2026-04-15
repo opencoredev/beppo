@@ -21,11 +21,9 @@ describe("getVscodeIconUrlForEntry", () => {
   it("uses folder mappings and light-aware filename mappings", () => {
     const folderUrl = getVscodeIconUrlForEntry("packages/src", "directory", "light");
     const fileUrl = getVscodeIconUrlForEntry("AGENTS.md", "file", "light");
-    const textFileUrl = getVscodeIconUrlForEntry("agents.txt", "file", "dark");
 
     assert.isTrue(folderUrl.endsWith("/folder_type_src.svg"));
     assert.isTrue(fileUrl.endsWith("/file_type_light_agents.svg"));
-    assert.isTrue(textFileUrl.endsWith("/file_type_agents.svg"));
   });
 
   it("falls back to language-based mappings for path-only cases", () => {

@@ -3,6 +3,7 @@ import type {
   GitStackedAction,
   GitStatusResult,
 } from "@t3tools/contracts";
+import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
 
 export type GitActionIconName = "commit" | "push" | "pr";
 
@@ -47,12 +48,17 @@ export function buildGitActionProgressStages(input: {
 }): string[] {
   const branchStages = input.featureBranch ? ["Preparing feature branch..."] : [];
   const pushStage = input.pushTarget ? `Pushing to ${input.pushTarget}...` : "Pushing...";
+  const prStages = [
+    "Preparing PR...",
+    "Generating PR content...",
+    "Creating GitHub pull request...",
+  ];
 
   if (input.action === "push") {
     return [pushStage];
   }
   if (input.action === "create_pr") {
-    return input.shouldPushBeforePr ? [pushStage, "Creating PR..."] : ["Creating PR..."];
+    return input.shouldPushBeforePr ? [pushStage, ...prStages] : prStages;
   }
 
   const shouldIncludeCommitStages = input.action === "commit" || input.hasWorkingTreeChanges;
@@ -67,7 +73,7 @@ export function buildGitActionProgressStages(input: {
   if (input.action === "commit_push") {
     return [...branchStages, ...commitStages, pushStage];
   }
-  return [...branchStages, ...commitStages, pushStage, "Creating PR..."];
+  return [...branchStages, ...commitStages, pushStage, ...prStages];
 }
 
 export function buildMenuItems(
@@ -346,6 +352,15 @@ export function resolveLiveThreadBranchUpdate(input: {
   }
 
   if (input.threadBranch === input.gitStatus.branch) {
+    return null;
+  }
+
+  if (
+    input.threadBranch !== null &&
+    input.gitStatus.branch !== null &&
+    !isTemporaryWorktreeBranch(input.threadBranch) &&
+    isTemporaryWorktreeBranch(input.gitStatus.branch)
+  ) {
     return null;
   }
 

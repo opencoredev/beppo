@@ -2,23 +2,26 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
+    "jsx": "react-jsx",
     "types": ["node", "bun"],
     "lib": ["ES2023", "DOM", "esnext.disposable"],
     "noEmit": true,
+    "baseUrl": "..",
     "allowImportingTsExtensions": true,
+    "paths": {
+      "~/*": ["apps/web/src/*"]
+    },
     "plugins": [
       {
         "name": "@effect/language-service"
       }
     ]
   },
-  "include": [
-    "**/*.ts",
-    "../apps/web/src/store.ts",
-    "../apps/web/src/session-logic.ts",
-    "../apps/web/src/terminalStateStore.ts",
-    "../apps/web/src/types.ts",
-    "../apps/web/src/lib/storage.ts",
-    "../apps/web/src/vite-env.d.ts"
+  "include": ["**/*.ts", "../apps/web/src/**/*.ts", "../apps/web/src/**/*.tsx"],
+  "exclude": [
+    "../apps/web/src/**/*.test.ts",
+    "../apps/web/src/**/*.test.tsx",
+    "../apps/web/src/**/*.browser.tsx",
+    "../apps/web/test"
   ]
 }
