@@ -750,7 +750,10 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
 
   it.effect("escalates terminal shutdown to SIGKILL when process does not exit in time", () =>
     Effect.gen(function* () {
-      const { manager, ptyAdapter } = yield* createManager(5, { processKillGraceMs: 10 });
+      const { manager, ptyAdapter } = yield* createManager(5, {
+        processKillGraceMs: 10,
+        subprocessChecker: () => Effect.succeed(true),
+      });
       yield* manager.open(openInput());
       const process = ptyAdapter.processes[0];
       expect(process).toBeDefined();
@@ -1023,6 +1026,7 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
       const scope = yield* Scope.make("sequential");
       const { manager, ptyAdapter } = yield* createManager(5, {
         processKillGraceMs: 10,
+        subprocessChecker: () => Effect.succeed(true),
       }).pipe(Effect.provideService(Scope.Scope, scope));
       yield* manager.open(openInput());
       const process = ptyAdapter.processes[0];

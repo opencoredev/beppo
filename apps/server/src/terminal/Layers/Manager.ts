@@ -629,6 +629,9 @@ function toSessionKey(threadId: string, terminalId: string): string {
 
 function shouldExcludeTerminalEnvKey(key: string): boolean {
   const normalizedKey = key.toUpperCase();
+  if (normalizedKey === "T3CODE_PROJECT_ROOT" || normalizedKey === "T3CODE_WORKTREE_PATH") {
+    return false;
+  }
   if (normalizedKey.startsWith("T3CODE_")) {
     return true;
   }
@@ -812,7 +815,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       threadId: string,
       terminalId: string,
     ) {
-      const terminated = yield* Effect.try({
+      const termSignalSent = yield* Effect.try({
         try: () => process.kill("SIGTERM"),
         catch: (cause) =>
           new TerminalProcessSignalError({
@@ -831,28 +834,30 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           }).pipe(Effect.as(false)),
         ),
       );
-      if (!terminated) {
-        yield* Effect.sleep(processKillGraceMs);
-
-        yield* Effect.try({
-          try: () => process.kill("SIGKILL"),
-          catch: (cause) =>
-            new TerminalProcessSignalError({
-              message: "Failed to send SIGKILL to terminal process.",
-              cause,
-              signal: "SIGKILL",
-            }),
-        }).pipe(
-          Effect.catch((error) =>
-            Effect.logWarning("failed to force-kill terminal process", {
-              threadId,
-              terminalId,
-              signal: "SIGKILL",
-              error: error.message,
-            }),
-          ),
-        );
+      if (!termSignalSent) {
+        return;
       }
+
+      yield* Effect.sleep(processKillGraceMs);
+
+      yield* Effect.try({
+        try: () => process.kill("SIGKILL"),
+        catch: (cause) =>
+          new TerminalProcessSignalError({
+            message: "Failed to send SIGKILL to terminal process.",
+            cause,
+            signal: "SIGKILL",
+          }),
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("failed to force-kill terminal process", {
+            threadId,
+            terminalId,
+            signal: "SIGKILL",
+            error: error.message,
+          }),
+        ),
+      );
     });
 
     const startKillEscalation = Effect.fn("terminal.startKillEscalation")(function* (

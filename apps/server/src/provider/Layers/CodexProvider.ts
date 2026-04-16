@@ -648,6 +648,10 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     readonly homePath?: string;
     readonly cwd: string;
   }) => Effect.Effect<ReadonlyArray<ServerProviderSkill> | undefined>,
+  resolveRateLimits?: (input: {
+    readonly binaryPath: string;
+    readonly homePath?: string;
+  }) => Effect.Effect<unknown, never, FileSystem.FileSystem | Path.Path>,
 ): Effect.fn.Return<
   ServerProvider,
   ServerSettingsError,
@@ -840,11 +844,11 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   const authType = codexAuthSubType(account);
   const authLabel = codexAuthSubLabel(account);
   const rateLimits =
-    parsed.auth.status === "authenticated"
-      ? yield* probeCodexRateLimits({
+    parsed.auth.status === "authenticated" && resolveRateLimits
+      ? yield* resolveRateLimits({
           binaryPath: codexSettings.binaryPath,
           ...(codexSettings.homePath ? { homePath: codexSettings.homePath } : {}),
-        })
+        }).pipe(Effect.orElseSucceed(() => undefined))
       : undefined;
   return buildServerProvider({
     provider: PROVIDER,
@@ -887,7 +891,7 @@ const makePendingCodexProvider = (codexSettings: CodexSettings): ServerProvider 
         version: null,
         status: "warning",
         auth: { status: "unknown" },
-        message: "Codex is disabled in T3 Code settings.",
+        message: "Codex is disabled in Beppo settings.",
       },
     });
   }
@@ -941,6 +945,7 @@ export const CodexProviderLive = Layer.effect(
           cwd: process.cwd(),
         }).pipe(Effect.map((discovery) => discovery?.account)),
       (input) => getDiscovery(input).pipe(Effect.map((discovery) => discovery?.skills)),
+      (input) => probeCodexRateLimits(input),
     ).pipe(
       Effect.provideService(ServerSettingsService, serverSettings),
       Effect.provideService(FileSystem.FileSystem, fileSystem),

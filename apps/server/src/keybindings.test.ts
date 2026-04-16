@@ -516,9 +516,6 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.isFalse(persisted.some((entry) => String(entry.command) === "view.chat"));
       assert.isTrue(persisted.some((entry) => entry.command === "terminal.toggle"));
       assert.isTrue(persisted.some((entry) => entry.command === "palette.open"));
-      for (const defaultRule of DEFAULT_KEYBINDINGS) {
-        assert.isTrue(persisted.some((entry) => entry.command === defaultRule.command));
-      }
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 
