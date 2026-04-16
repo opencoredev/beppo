@@ -366,7 +366,15 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             provider: "codex",
             model: "gpt-5-codex",
           },
-          scripts: [],
+          scripts: [
+            {
+              id: "script-1",
+              name: "Build",
+              command: "bun run build",
+              icon: "build",
+              runOnWorktreeCreate: false,
+            },
+          ],
           createdAt: "2026-02-24T00:00:00.000Z",
           updatedAt: "2026-02-24T00:00:01.000Z",
         },
