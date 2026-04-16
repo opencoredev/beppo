@@ -258,6 +258,7 @@ function mapProjectShellRow(
     workspaceRoot: row.workspaceRoot,
     repositoryIdentity,
     defaultModelSelection: row.defaultModelSelection,
+    scripts: row.scripts,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
