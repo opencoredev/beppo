@@ -7,7 +7,7 @@ import {
   CodexModelOptions,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
 } from "./model";
-import { ModelSelection } from "./orchestration";
+import { TextGenerationModelSelection } from "./orchestration";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -27,6 +27,17 @@ export const ClientSettingsSchema = Schema.Struct({
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
   diffWordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  showSidebarProviders: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  showSidebarUpdatePill: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  sidebarProviderVisibility: Schema.Struct({
+    codex: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+    claudeAgent: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  }).pipe(
+    Schema.withDecodingDefault(() => ({
+      codex: true,
+      claudeAgent: true,
+    })),
+  ),
   sidebarProjectSortOrder: SidebarProjectSortOrder.pipe(
     Schema.withDecodingDefault(() => DEFAULT_SIDEBAR_PROJECT_SORT_ORDER),
   ),
@@ -71,12 +82,40 @@ export const ClaudeSettings = Schema.Struct({
 });
 export type ClaudeSettings = typeof ClaudeSettings.Type;
 
+export const OpenAICompatibleWireApi = Schema.Literals(["chat-completions"]);
+export type OpenAICompatibleWireApi = typeof OpenAICompatibleWireApi.Type;
+
+export const OpenAICompatibleEndpointSettings = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  label: TrimmedNonEmptyString,
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  baseUrl: TrimmedNonEmptyString,
+  apiKey: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
+  apiKeyEnvVar: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
+  model: TrimmedNonEmptyString.pipe(
+    Schema.withDecodingDefault(
+      () => DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.openaiCompatible,
+    ),
+  ),
+  wireApi: OpenAICompatibleWireApi.pipe(
+    Schema.withDecodingDefault(() => "chat-completions" as const),
+  ),
+});
+export type OpenAICompatibleEndpointSettings = typeof OpenAICompatibleEndpointSettings.Type;
+
+export const OpenAICompatibleSettings = Schema.Struct({
+  endpoints: Schema.Array(OpenAICompatibleEndpointSettings).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+});
+export type OpenAICompatibleSettings = typeof OpenAICompatibleSettings.Type;
+
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
     Schema.withDecodingDefault(() => "local" as const satisfies ThreadEnvMode),
   ),
-  textGenerationModelSelection: ModelSelection.pipe(
+  textGenerationModelSelection: TextGenerationModelSelection.pipe(
     Schema.withDecodingDefault(() => ({
       provider: "codex" as const,
       model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
@@ -87,6 +126,7 @@ export const ServerSettings = Schema.Struct({
   providers: Schema.Struct({
     codex: CodexSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     claudeAgent: ClaudeSettings.pipe(Schema.withDecodingDefault(() => ({}))),
+    openaiCompatible: OpenAICompatibleSettings.pipe(Schema.withDecodingDefault(() => ({}))),
   }).pipe(Schema.withDecodingDefault(() => ({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
@@ -139,6 +179,11 @@ const ModelSelectionPatch = Schema.Union([
     model: Schema.optionalKey(TrimmedNonEmptyString),
     options: Schema.optionalKey(ClaudeModelOptionsPatch),
   }),
+  Schema.Struct({
+    provider: Schema.optionalKey(Schema.Literal("openaiCompatible")),
+    endpointId: Schema.optionalKey(TrimmedNonEmptyString),
+    model: Schema.optionalKey(TrimmedNonEmptyString),
+  }),
 ]);
 
 const CodexSettingsPatch = Schema.Struct({
@@ -154,6 +199,10 @@ const ClaudeSettingsPatch = Schema.Struct({
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
+const OpenAICompatibleSettingsPatch = Schema.Struct({
+  endpoints: Schema.optionalKey(Schema.Array(OpenAICompatibleEndpointSettings)),
+});
+
 export const ServerSettingsPatch = Schema.Struct({
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
@@ -162,6 +211,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       codex: Schema.optionalKey(CodexSettingsPatch),
       claudeAgent: Schema.optionalKey(ClaudeSettingsPatch),
+      openaiCompatible: Schema.optionalKey(OpenAICompatibleSettingsPatch),
     }),
   ),
 });

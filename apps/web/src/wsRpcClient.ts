@@ -82,11 +82,13 @@ export interface WsRpcClient {
     readonly updateSettings: (
       patch: ServerSettingsPatch,
     ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.serverUpdateSettings>>;
+    readonly transcribeVoice: RpcUnaryMethod<typeof WS_METHODS.serverTranscribeVoice>;
     readonly subscribeConfig: RpcStreamMethod<typeof WS_METHODS.subscribeServerConfig>;
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
   };
   readonly orchestration: {
-    readonly getSnapshot: RpcUnaryNoArgMethod<typeof ORCHESTRATION_WS_METHODS.getSnapshot>;
+    readonly getSnapshot: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getSnapshot>;
+    readonly getThreadSnapshot: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getThreadSnapshot>;
     readonly dispatchCommand: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>;
     readonly getTurnDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getTurnDiff>;
     readonly getFullThreadDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getFullThreadDiff>;
@@ -179,14 +181,18 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
       getSettings: () => transport.request((client) => client[WS_METHODS.serverGetSettings]({})),
       updateSettings: (patch) =>
         transport.request((client) => client[WS_METHODS.serverUpdateSettings]({ patch })),
+      transcribeVoice: (input) =>
+        transport.request((client) => client[WS_METHODS.serverTranscribeVoice](input)),
       subscribeConfig: (listener) =>
         transport.subscribe((client) => client[WS_METHODS.subscribeServerConfig]({}), listener),
       subscribeLifecycle: (listener) =>
         transport.subscribe((client) => client[WS_METHODS.subscribeServerLifecycle]({}), listener),
     },
     orchestration: {
-      getSnapshot: () =>
-        transport.request((client) => client[ORCHESTRATION_WS_METHODS.getSnapshot]({})),
+      getSnapshot: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.getSnapshot](input)),
+      getThreadSnapshot: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.getThreadSnapshot](input)),
       dispatchCommand: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.dispatchCommand](input)),
       getTurnDiff: (input) =>

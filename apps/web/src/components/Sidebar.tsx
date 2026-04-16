@@ -7,7 +7,6 @@ import {
   MessageSquareIcon,
   PinIcon,
   PlusIcon,
-  SearchIcon,
   SettingsIcon,
   SquarePenIcon,
   TerminalIcon,
@@ -59,7 +58,7 @@ import {
   type SidebarThreadSortOrder,
 } from "@t3tools/contracts/settings";
 import { isElectron } from "../env";
-import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../branding";
+import { APP_BASE_NAME, APP_VERSION } from "../branding";
 import beppoIcon from "../assets/icon.jpg";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
@@ -75,7 +74,7 @@ import {
   threadTraversalDirectionFromCommand,
 } from "../keybindings";
 import { gitStatusQueryOptions } from "../lib/gitReactQuery";
-import { readNativeApi } from "../nativeApi";
+import { ensureNativeApi, readNativeApi } from "../nativeApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 
@@ -132,14 +131,16 @@ import {
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
-import { useServerKeybindings } from "../rpc/serverState";
+import { useServerConfig, useServerKeybindings } from "../rpc/serverState";
 import { useSidebarThreadSummaryById } from "../storeSelectors";
 import type { Project } from "../types";
 import { ProviderIdentityIcon } from "./ProviderIdentityIcon";
+import { SidebarProviderStatusList } from "./SidebarProviderStatusList";
 import { usePinnedThreadsStore } from "~/pinnedThreadsStore";
 import { ThreadPinToggleButton } from "./ThreadPinToggleButton";
 import { useCommandPalette } from "~/commandPalette/useCommandPalette";
 import { createCommand } from "~/commandPalette/commandRegistry";
+import { useServerProviders } from "../rpc/serverState";
 const THREAD_PREVIEW_LIMIT = 6;
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
@@ -282,6 +283,7 @@ interface SidebarThreadRowProps {
     position: { x: number; y: number },
   ) => Promise<void>;
   clearSelection: () => void;
+  beginRenameThread: (threadId: ThreadId, title: string) => void;
   commitRename: (threadId: ThreadId, newTitle: string, originalTitle: string) => Promise<void>;
   cancelRename: () => void;
   attemptArchiveThread: (threadId: ThreadId) => Promise<void>;
@@ -351,6 +353,15 @@ function SidebarThreadRow(props: SidebarThreadRowProps) {
         onClick={(event) => {
           props.handleThreadClick(event, thread.id, props.orderedProjectThreadIds);
         }}
+        onDoubleClick={(event) => {
+          const target = event.target instanceof HTMLElement ? event.target : null;
+          if (target?.closest("button, a, input, textarea, select, [data-thread-selection-safe]")) {
+            return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          props.beginRenameThread(thread.id, thread.title);
+        }}
         onKeyDown={(event) => {
           if (event.key !== "Enter" && event.key !== " ") return;
           event.preventDefault();
@@ -399,7 +410,7 @@ function SidebarThreadRow(props: SidebarThreadRowProps) {
             className="size-3 shrink-0 text-muted-foreground/68"
             title={thread.modelProvider === "claudeAgent" ? "Claude thread" : "Codex thread"}
           />
-          {threadStatus && <ThreadStatusLabel status={threadStatus} />}
+          {threadStatus && <ThreadStatusLabel status={threadStatus} compact />}
           {props.renamingThreadId === thread.id ? (
             <input
               ref={(element) => {
@@ -696,7 +707,6 @@ export default function Sidebar() {
     (store) => store.clearProjectDraftThreadId,
   );
   const registerCommands = useCommandPalette((state) => state.registerCommands);
-  const openCommandPalette = useCommandPalette((state) => state.open);
   const pinnedThreadIds = usePinnedThreadsStore((state) => state.pinnedThreadIds);
   const syncPinnedThreadIds = usePinnedThreadsStore((state) => state.syncThreadIds);
   const navigate = useNavigate();
@@ -711,11 +721,11 @@ export default function Sidebar() {
     select: (params) => (params.threadId ? ThreadId.makeUnsafe(params.threadId) : null),
   });
   const keybindings = useServerKeybindings();
-  const paletteShortcutLabel = useMemo(
-    () => shortcutLabelForCommand(keybindings, "palette.open"),
-    [keybindings],
-  );
+  const serverConfig = useServerConfig();
+  const serverProviders = useServerProviders();
+  const hasRequestedProviderRefreshRef = useRef(false);
   const [addingProject, setAddingProject] = useState(false);
+  const [showManualProjectPathEntry, setShowManualProjectPathEntry] = useState(false);
   const [newCwd, setNewCwd] = useState("");
   const [isPickingFolder, setIsPickingFolder] = useState(false);
   const [isAddingProject, setIsAddingProject] = useState(false);
@@ -743,6 +753,27 @@ export default function Sidebar() {
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const platform = navigator.platform;
   const shouldShowProjectPathEntry = addingProject;
+
+  useEffect(() => {
+    if (!shouldShowProjectPathEntry || !showManualProjectPathEntry) {
+      return;
+    }
+    addProjectInputRef.current?.focus();
+  }, [shouldShowProjectPathEntry, showManualProjectPathEntry]);
+
+  useEffect(() => {
+    if (serverProviders.length > 0 || hasRequestedProviderRefreshRef.current) {
+      return;
+    }
+
+    hasRequestedProviderRefreshRef.current = true;
+    void ensureNativeApi()
+      .server.refreshProviders()
+      .catch(() => {
+        hasRequestedProviderRefreshRef.current = false;
+      });
+  }, [serverProviders.length]);
+
   const orderedProjects = useMemo(() => {
     return orderItemsByPreferredIds({
       items: projects,
@@ -892,6 +923,7 @@ export default function Sidebar() {
         setIsAddingProject(false);
         setNewCwd("");
         setAddProjectError(null);
+        setShowManualProjectPathEntry(false);
         setAddingProject(false);
       };
 
@@ -965,12 +997,34 @@ export default function Sidebar() {
 
   const handleStartAddProject = () => {
     setAddProjectError(null);
-    setAddingProject((prev) => !prev);
+    setAddingProject((prev) => {
+      const next = !prev;
+      if (!next) {
+        setShowManualProjectPathEntry(false);
+      }
+      return next;
+    });
+  };
+
+  const handleShowManualProjectPathEntry = () => {
+    setAddProjectError(null);
+    setShowManualProjectPathEntry(true);
+  };
+
+  const handleHideManualProjectPathEntry = () => {
+    setAddProjectError(null);
+    setShowManualProjectPathEntry(false);
   };
 
   const cancelRename = useCallback(() => {
     setRenamingThreadId(null);
     renamingInputRef.current = null;
+  }, []);
+
+  const beginRenameThread = useCallback((threadId: ThreadId, title: string) => {
+    setRenamingThreadId(threadId);
+    setRenamingTitle(title);
+    renamingCommittedRef.current = false;
   }, []);
 
   const commitRename = useCallback(
@@ -1076,9 +1130,7 @@ export default function Sidebar() {
       );
 
       if (clicked === "rename") {
-        setRenamingThreadId(threadId);
-        setRenamingTitle(thread.title);
-        renamingCommittedRef.current = false;
+        beginRenameThread(threadId, thread.title);
         return;
       }
 
@@ -1118,6 +1170,7 @@ export default function Sidebar() {
     },
     [
       appSettings.confirmThreadDelete,
+      beginRenameThread,
       copyPathToClipboard,
       copyThreadIdToClipboard,
       deleteThread,
@@ -1811,6 +1864,7 @@ export default function Sidebar() {
                 handleMultiSelectContextMenu={handleMultiSelectContextMenu}
                 handleThreadContextMenu={handleThreadContextMenu}
                 clearSelection={clearSelection}
+                beginRenameThread={beginRenameThread}
                 commitRename={commitRename}
                 cancelRename={cancelRename}
                 attemptArchiveThread={attemptArchiveThread}
@@ -2039,25 +2093,41 @@ export default function Sidebar() {
     });
   }, []);
 
+  const handleBrandClick = useCallback(() => {
+    void navigate({ to: "/" });
+  }, [navigate]);
+
+  const visibleSidebarProviders = useMemo(
+    () =>
+      serverProviders.filter(
+        (provider) => appSettings.sidebarProviderVisibility[provider.provider],
+      ),
+    [appSettings.sidebarProviderVisibility, serverProviders],
+  );
+
   const wordmark = (
-    <div className="flex min-w-0 items-center gap-2">
-      <SidebarTrigger className="shrink-0 md:hidden" />
+    <div className="relative flex min-w-0 w-full items-center justify-center">
+      <SidebarTrigger className="absolute left-0 shrink-0 md:hidden" />
       <Tooltip>
         <TooltipTrigger
           render={
-            <div className="ml-1 flex min-w-0 flex-1 items-center gap-1.5 cursor-pointer">
-              <img src={beppoIcon} alt="Beppo" className="size-5 rounded-md" />
-              <span className="truncate text-sm font-semibold tracking-tight text-foreground">
+            <button
+              type="button"
+              aria-label={isOnSettings ? `Back to ${APP_BASE_NAME}` : `${APP_BASE_NAME} home`}
+              className="flex w-full max-w-[9.5rem] items-center justify-center gap-2 px-2 py-1.5 text-center transition-opacity hover:opacity-90"
+              onClick={handleBrandClick}
+            >
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-xl">
+                <img src={beppoIcon} alt="Beppo" className="size-4.5 rounded-sm" />
+              </span>
+              <span className="min-w-0 truncate font-brand text-sm font-semibold tracking-[0.01em] text-foreground">
                 {APP_BASE_NAME}
               </span>
-              <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
-                {APP_STAGE_LABEL}
-              </span>
-            </div>
+            </button>
           }
         />
         <TooltipPopup side="bottom" sideOffset={2}>
-          Version {APP_VERSION}
+          {isOnSettings ? `Return to ${APP_BASE_NAME}` : `Version ${APP_VERSION}`}
         </TooltipPopup>
       </Tooltip>
     </div>
@@ -2066,45 +2136,11 @@ export default function Sidebar() {
   return (
     <>
       {isElectron ? (
-        <SidebarHeader className="gap-2 px-3 pb-2 pt-0 sm:px-4">
-          <div className="drag-region flex h-[52px] items-center pl-[90px]">{wordmark}</div>
-          <button
-            type="button"
-            aria-label="Open command palette"
-            className="inline-flex h-9 w-full items-center justify-between rounded-xl border border-border/70 bg-background/70 px-3 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            onClick={openCommandPalette}
-          >
-            <span className="inline-flex min-w-0 items-center gap-2">
-              <SearchIcon className="size-3.5 shrink-0" />
-              <span className="truncate">Search threads, projects, and actions</span>
-            </span>
-            {paletteShortcutLabel ? (
-              <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground/76">
-                {paletteShortcutLabel}
-              </span>
-            ) : null}
-          </button>
+        <SidebarHeader className="px-3 pb-2 pt-0 sm:px-4">
+          <div className="drag-region flex h-[64px] items-center justify-center">{wordmark}</div>
         </SidebarHeader>
       ) : (
-        <SidebarHeader className="gap-2 px-3 py-2 sm:px-4 sm:py-3">
-          {wordmark}
-          <button
-            type="button"
-            aria-label="Open command palette"
-            className="inline-flex h-9 w-full items-center justify-between rounded-xl border border-border/70 bg-background/70 px-3 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            onClick={openCommandPalette}
-          >
-            <span className="inline-flex min-w-0 items-center gap-2">
-              <SearchIcon className="size-3.5 shrink-0" />
-              <span className="truncate">Search threads, projects, and actions</span>
-            </span>
-            {paletteShortcutLabel ? (
-              <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground/76">
-                {paletteShortcutLabel}
-              </span>
-            ) : null}
-          </button>
-        </SidebarHeader>
+        <SidebarHeader className="px-3 py-2.5 sm:px-4 sm:py-3">{wordmark}</SidebarHeader>
       )}
 
       {isOnSettings ? (
@@ -2167,6 +2203,7 @@ export default function Sidebar() {
                       handleMultiSelectContextMenu={handleMultiSelectContextMenu}
                       handleThreadContextMenu={handleThreadContextMenu}
                       clearSelection={clearSelection}
+                      beginRenameThread={beginRenameThread}
                       commitRename={commitRename}
                       cancelRename={cancelRename}
                       attemptArchiveThread={attemptArchiveThread}
@@ -2222,48 +2259,84 @@ export default function Sidebar() {
               </div>
               {shouldShowProjectPathEntry && (
                 <div className="mb-2 px-1">
-                  {isElectron && (
-                    <button
-                      type="button"
-                      className="mb-1.5 flex w-full items-center justify-center gap-2 rounded-md border border-border bg-secondary py-1.5 text-xs text-foreground/80 transition-colors duration-150 hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
-                      onClick={() => void handlePickFolder()}
-                      disabled={isPickingFolder || isAddingProject}
-                    >
-                      <FolderIcon className="size-3.5" />
-                      {isPickingFolder ? "Picking folder..." : "Browse for folder"}
-                    </button>
-                  )}
-                  <div className="flex gap-1.5">
-                    <input
-                      ref={addProjectInputRef}
-                      className={`min-w-0 flex-1 rounded-md border bg-secondary px-2 py-1 font-mono text-xs text-foreground placeholder:text-muted-foreground/40 focus:outline-none ${
-                        addProjectError
-                          ? "border-red-500/70 focus:border-red-500"
-                          : "border-border focus:border-ring"
-                      }`}
-                      placeholder="/path/to/project"
-                      value={newCwd}
-                      onChange={(event) => {
-                        setNewCwd(event.target.value);
-                        setAddProjectError(null);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") handleAddProject();
-                        if (event.key === "Escape") {
-                          setAddingProject(false);
-                          setAddProjectError(null);
-                        }
-                      }}
-                      autoFocus
-                    />
-                    <button
-                      type="button"
-                      className="shrink-0 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition-colors duration-150 hover:bg-primary/90 disabled:opacity-60"
-                      onClick={handleAddProject}
-                      disabled={!canAddProject}
-                    >
-                      {isAddingProject ? "Adding..." : "Add"}
-                    </button>
+                  <div className="rounded-xl border border-border/70 bg-muted/20 p-2.5">
+                    <div className="mb-2 flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium text-foreground">Link a local project</p>
+                        <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground/70">
+                          Open a folder directly or paste a workspace path. Existing projects still
+                          jump back to their latest thread.
+                        </p>
+                      </div>
+                      {showManualProjectPathEntry ? (
+                        <button
+                          type="button"
+                          className="inline-flex h-7 shrink-0 items-center justify-center rounded-md px-2 text-[11px] font-medium text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+                          onClick={handleHideManualProjectPathEntry}
+                        >
+                          Back
+                        </button>
+                      ) : null}
+                    </div>
+
+                    {showManualProjectPathEntry ? (
+                      <div className="flex gap-1.5">
+                        <input
+                          ref={addProjectInputRef}
+                          className={`min-w-0 flex-1 rounded-lg border bg-background px-2.5 py-1.5 font-mono text-xs text-foreground placeholder:text-muted-foreground/40 focus:outline-none ${
+                            addProjectError
+                              ? "border-red-500/70 focus:border-red-500"
+                              : "border-border focus:border-ring"
+                          }`}
+                          placeholder="/path/to/project"
+                          value={newCwd}
+                          onChange={(event) => {
+                            setNewCwd(event.target.value);
+                            setAddProjectError(null);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") handleAddProject();
+                            if (event.key === "Escape") {
+                              handleHideManualProjectPathEntry();
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="shrink-0 rounded-lg bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground transition-colors duration-150 hover:bg-primary/90 disabled:opacity-60"
+                          onClick={handleAddProject}
+                          disabled={!canAddProject}
+                        >
+                          {isAddingProject ? "Adding..." : "Add"}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex gap-1.5">
+                        {isElectron ? (
+                          <button
+                            type="button"
+                            className="flex h-9 flex-1 items-center justify-center gap-2 rounded-lg border border-border/70 bg-background/80 px-2 text-xs font-medium text-foreground/80 transition-colors duration-150 hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                            onClick={() => void handlePickFolder()}
+                            disabled={isPickingFolder || isAddingProject}
+                          >
+                            <FolderIcon className="size-3.5" />
+                            {isPickingFolder
+                              ? "Picking folder..."
+                              : isAddingProject
+                                ? "Adding..."
+                                : "Browse"}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="flex h-9 flex-1 items-center justify-center gap-2 rounded-lg border border-border/70 bg-background/80 px-2 text-xs font-medium text-foreground/80 transition-colors duration-150 hover:bg-accent hover:text-foreground"
+                          onClick={handleShowManualProjectPathEntry}
+                        >
+                          <SquarePenIcon className="size-3.5" />
+                          Type path
+                        </button>
+                      </div>
+                    )}
                   </div>
                   {addProjectError && (
                     <p className="mt-1 px-0.5 text-[11px] leading-tight text-red-400">
@@ -2318,7 +2391,14 @@ export default function Sidebar() {
 
           <SidebarSeparator />
           <SidebarFooter className="p-2">
-            <SidebarUpdatePill />
+            {appSettings.showSidebarUpdatePill ? <SidebarUpdatePill /> : null}
+            {appSettings.showSidebarProviders ? (
+              <SidebarProviderStatusList
+                providers={visibleSidebarProviders}
+                isLoading={serverConfig === null}
+                onOpenSettings={() => void navigate({ to: "/settings" })}
+              />
+            ) : null}
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton

@@ -13,11 +13,11 @@
 import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   DEFAULT_SERVER_SETTINGS,
-  type ModelSelection,
-  type ProviderKind,
   ServerSettings,
   ServerSettingsError,
   type ServerSettingsPatch,
+  type TextGenerationProviderKind,
+  type TextGenerationModelSelection,
 } from "@t3tools/contracts";
 import {
   Cache,
@@ -91,33 +91,68 @@ export class ServerSettingsService extends ServiceMap.Service<
 
 const ServerSettingsJson = fromLenientJson(ServerSettings);
 
-const PROVIDER_ORDER: readonly ProviderKind[] = ["codex", "claudeAgent"];
+const BUILT_IN_TEXT_GENERATION_PROVIDER_ORDER = [
+  "codex",
+  "claudeAgent",
+] as const satisfies ReadonlyArray<Exclude<TextGenerationProviderKind, "openaiCompatible">>;
+
+function getEnabledOpenAICompatibleEndpoints(settings: ServerSettings) {
+  return settings.providers.openaiCompatible.endpoints.filter((endpoint) => endpoint.enabled);
+}
 
 /**
- * Ensure the `textGenerationModelSelection` points to an enabled provider.
- * If the selected provider is disabled, fall back to the first enabled
- * provider with its default model.  This is applied at read-time so the
- * persisted preference is preserved for when a provider is re-enabled.
+ * Ensure the `textGenerationModelSelection` points to an enabled built-in
+ * provider or an enabled custom OpenAI-compatible endpoint.
+ *
+ * If the selected target is disabled or missing, fall back to the first
+ * enabled built-in provider with its default model. If no built-in provider is
+ * enabled, fall back to the first enabled custom endpoint.
+ *
+ * This is applied at read-time so the persisted preference is preserved for
+ * when a provider or endpoint is re-enabled.
  */
 function resolveTextGenerationProvider(settings: ServerSettings): ServerSettings {
   const selection = settings.textGenerationModelSelection;
-  if (settings.providers[selection.provider].enabled) {
+  const enabledCustomEndpoints = getEnabledOpenAICompatibleEndpoints(settings);
+
+  if (selection.provider === "openaiCompatible") {
+    const selectedEndpoint = enabledCustomEndpoints.find(
+      (endpoint) => endpoint.id === selection.endpointId,
+    );
+    if (selectedEndpoint) {
+      return settings;
+    }
+  } else if (settings.providers[selection.provider].enabled) {
     return settings;
   }
 
-  const fallback = PROVIDER_ORDER.find((p) => settings.providers[p].enabled);
-  if (!fallback) {
-    // No providers enabled — return as-is; callers will report the error.
-    return settings;
+  const builtInFallback = BUILT_IN_TEXT_GENERATION_PROVIDER_ORDER.find(
+    (provider) => settings.providers[provider].enabled,
+  );
+  if (builtInFallback) {
+    return {
+      ...settings,
+      textGenerationModelSelection: {
+        provider: builtInFallback,
+        model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[builtInFallback],
+      } as TextGenerationModelSelection,
+    };
   }
 
-  return {
-    ...settings,
-    textGenerationModelSelection: {
-      provider: fallback,
-      model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[fallback],
-    } as ModelSelection,
-  };
+  const customFallback = enabledCustomEndpoints[0];
+  if (customFallback) {
+    return {
+      ...settings,
+      textGenerationModelSelection: {
+        provider: "openaiCompatible",
+        endpointId: customFallback.id,
+        model: customFallback.model,
+      },
+    };
+  }
+
+  // No valid fallback — return as-is; callers will surface the error.
+  return settings;
 }
 
 // Values under these keys are compared as a whole — never stripped field-by-field.

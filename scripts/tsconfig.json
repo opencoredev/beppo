@@ -3,7 +3,7 @@
   "compilerOptions": {
     "composite": true,
     "types": ["node", "bun"],
-    "lib": ["ES2023", "esnext.disposable"],
+    "lib": ["ES2023", "DOM", "esnext.disposable"],
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "plugins": [
@@ -12,5 +12,13 @@
       }
     ]
   },
-  "include": ["**/*.ts"]
+  "include": [
+    "**/*.ts",
+    "../apps/web/src/store.ts",
+    "../apps/web/src/session-logic.ts",
+    "../apps/web/src/terminalStateStore.ts",
+    "../apps/web/src/types.ts",
+    "../apps/web/src/lib/storage.ts",
+    "../apps/web/src/vite-env.d.ts"
+  ]
 }

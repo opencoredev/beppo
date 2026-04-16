@@ -82,15 +82,22 @@ export function createWsNativeApi(): NativeApi {
         return showContextMenuFallback(items, position);
       },
     },
+    microphone: {
+      openSystemSettings: async () => {
+        return (await window.desktopBridge?.microphone?.openSystemSettings?.()) ?? false;
+      },
+    },
     server: {
       getConfig: rpcClient.server.getConfig,
       refreshProviders: rpcClient.server.refreshProviders,
       upsertKeybinding: rpcClient.server.upsertKeybinding,
       getSettings: rpcClient.server.getSettings,
       updateSettings: rpcClient.server.updateSettings,
+      transcribeVoice: rpcClient.server.transcribeVoice,
     },
     orchestration: {
-      getSnapshot: rpcClient.orchestration.getSnapshot,
+      getSnapshot: (input) => rpcClient.orchestration.getSnapshot(input ?? {}),
+      getThreadSnapshot: (threadId) => rpcClient.orchestration.getThreadSnapshot({ threadId }),
       dispatchCommand: rpcClient.orchestration.dispatchCommand,
       getTurnDiff: rpcClient.orchestration.getTurnDiff,
       getFullThreadDiff: rpcClient.orchestration.getFullThreadDiff,

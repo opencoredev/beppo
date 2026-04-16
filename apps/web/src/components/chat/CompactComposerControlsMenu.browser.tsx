@@ -116,6 +116,9 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
       activePlan={false}
       interactionMode="default"
       planSidebarOpen={false}
+      providerSummary={null}
+      quickCommands={[]}
+      projectScripts={[]}
       runtimeMode="approval-required"
       traitsMenuContent={
         <TraitsMenuContent
@@ -128,6 +131,8 @@ async function mountMenu(props?: { modelSelection?: ModelSelection; prompt?: str
           onPromptChange={onPromptChange}
         />
       }
+      onSelectQuickCommand={vi.fn()}
+      onRunProjectScript={vi.fn()}
       onToggleInteractionMode={vi.fn()}
       onTogglePlanSidebar={vi.fn()}
       onToggleRuntimeMode={vi.fn()}

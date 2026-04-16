@@ -290,7 +290,7 @@ function errorSummary(error: unknown): string {
 
 function EventRouter() {
   const applyOrchestrationEvents = useStore((store) => store.applyOrchestrationEvents);
-  const syncServerReadModel = useStore((store) => store.syncServerReadModel);
+  const syncServerReadModelSummary = useStore((store) => store.syncServerReadModelSummary);
   const setProjectExpanded = useUiStateStore((store) => store.setProjectExpanded);
   const syncProjects = useUiStateStore((store) => store.syncProjects);
   const syncThreads = useUiStateStore((store) => store.syncThreads);
@@ -540,9 +540,9 @@ function EventRouter() {
       }
 
       try {
-        const snapshot = await api.orchestration.getSnapshot();
+        const snapshot = await api.orchestration.getSnapshot({ scope: "summary" });
         if (!disposed) {
-          syncServerReadModel(snapshot);
+          syncServerReadModelSummary(snapshot);
           reconcileSnapshotDerivedState();
           if (recovery.completeSnapshotRecovery(snapshot.snapshotSequence)) {
             void recoverFromSequenceGap();
@@ -606,7 +606,7 @@ function EventRouter() {
     clearThreadUi,
     setProjectExpanded,
     syncProjects,
-    syncServerReadModel,
+    syncServerReadModelSummary,
     syncThreads,
   ]);
 

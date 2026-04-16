@@ -24,7 +24,6 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       assert.deepEqual(decodePatch({ providers: { codex: { binaryPath: "/tmp/codex" } } }), {
         providers: { codex: { binaryPath: "/tmp/codex" } },
       });
-
       assert.deepEqual(
         decodePatch({
           textGenerationModelSelection: {
@@ -190,7 +189,6 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       assert.equal(next.providers.claudeAgent.binaryPath, "claude");
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
-
   it.effect("writes only non-default server settings to disk", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;

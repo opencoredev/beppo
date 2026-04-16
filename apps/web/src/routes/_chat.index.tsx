@@ -2,19 +2,11 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 
 import { APP_BASE_NAME } from "../branding";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "../components/ui/empty";
 import { isElectron } from "../env";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { normalizeDraftThreadId } from "../lib/routeSearch";
 import { SidebarTrigger } from "../components/ui/sidebar";
 import { useStore } from "../store";
-import { SparklesIcon } from "lucide-react";
 
 function ChatIndexRouteView() {
   const navigate = useNavigate();
@@ -69,18 +61,13 @@ function ChatIndexRouteView() {
         </div>
       )}
 
-      <div className="flex flex-1 items-center justify-center px-4">
-        <Empty className="max-w-xl">
-          <EmptyMedia variant="icon">
-            <SparklesIcon />
-          </EmptyMedia>
-          <EmptyHeader>
-            <EmptyTitle>{APP_BASE_NAME}</EmptyTitle>
-            <EmptyDescription>
-              Pick a thread from the sidebar or start a new one to continue.
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
+      <div className="flex flex-1 items-center justify-center px-6">
+        <div className="max-w-md text-center">
+          <div className="text-sm font-medium text-foreground">{APP_BASE_NAME}</div>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            Pick a thread from the sidebar or start a new one to continue.
+          </p>
+        </div>
       </div>
     </div>
   );

@@ -39,6 +39,8 @@
     "typecheck": "turbo run typecheck",
     "lint": "oxlint --report-unused-disable-directives",
     "test": "turbo run test",
+    "perf": "turbo run perf --filter=@t3tools/scripts",
+    "perf:check": "bun run scripts/perf-guardrails.ts",
     "test:desktop-smoke": "turbo run smoke-test --filter=@t3tools/desktop",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",

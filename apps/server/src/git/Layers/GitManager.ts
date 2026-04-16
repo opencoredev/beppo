@@ -7,7 +7,7 @@ import {
   GitActionProgressPhase,
   GitRunStackedActionResult,
   GitStackedAction,
-  ModelSelection,
+  TextGenerationModelSelection,
 } from "@t3tools/contracts";
 import {
   resolveAutoFeatureBranchName,
@@ -1041,7 +1041,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
       /** When true, also produce a semantic feature branch name. */
       includeBranch?: boolean;
       filePaths?: readonly string[];
-      modelSelection: ModelSelection;
+      modelSelection: TextGenerationModelSelection;
     }) {
       const context = yield* gitCore.prepareCommitContext(input.cwd, input.filePaths);
       if (!context) {
@@ -1081,7 +1081,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
   );
 
   const runCommitStep = Effect.fn("runCommitStep")(function* (
-    modelSelection: ModelSelection,
+    modelSelection: TextGenerationModelSelection,
     cwd: string,
     action: "commit" | "commit_push" | "commit_push_pr",
     branch: string | null,
@@ -1194,7 +1194,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
   });
 
   const runPrStep = Effect.fn("runPrStep")(function* (
-    modelSelection: ModelSelection,
+    modelSelection: TextGenerationModelSelection,
     cwd: string,
     fallbackBranch: string | null,
   ) {
@@ -1451,7 +1451,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
   });
 
   const runFeatureBranchStep = Effect.fn("runFeatureBranchStep")(function* (
-    modelSelection: ModelSelection,
+    modelSelection: TextGenerationModelSelection,
     cwd: string,
     branch: string | null,
     commitMessage?: string,

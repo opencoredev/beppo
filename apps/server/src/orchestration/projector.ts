@@ -1,4 +1,9 @@
-import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@t3tools/contracts";
+import type {
+  MessageId,
+  OrchestrationEvent,
+  OrchestrationReadModel,
+  ThreadId,
+} from "@t3tools/contracts";
 import {
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
@@ -26,10 +31,16 @@ import {
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
 } from "./Schemas.ts";
+import { findProjectById, findThreadById } from "./commandInvariants.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
 const MAX_THREAD_MESSAGES = 2_000;
 const MAX_THREAD_CHECKPOINTS = 500;
+const threadIndexCache = new WeakMap<ReadonlyArray<OrchestrationThread>, Map<ThreadId, number>>();
+const messageIndexCache = new WeakMap<
+  ReadonlyArray<OrchestrationMessage>,
+  Map<MessageId, number>
+>();
 
 function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error") {
   if (status === "error") return "error" as const;
@@ -42,7 +53,51 @@ function updateThread(
   threadId: ThreadId,
   patch: ThreadPatch,
 ): OrchestrationThread[] {
-  return threads.map((thread) => (thread.id === threadId ? { ...thread, ...patch } : thread));
+  let indexes = threadIndexCache.get(threads);
+  if (!indexes) {
+    indexes = new Map<ThreadId, number>();
+    for (let index = 0; index < threads.length; index += 1) {
+      const thread = threads[index];
+      if (thread) {
+        indexes.set(thread.id, index);
+      }
+    }
+    threadIndexCache.set(threads, indexes);
+  }
+
+  const threadIndex = indexes.get(threadId);
+  if (threadIndex === undefined) {
+    return threads.slice();
+  }
+
+  const nextThreads = threads.slice();
+  const thread = nextThreads[threadIndex];
+  if (!thread) {
+    return nextThreads;
+  }
+  nextThreads[threadIndex] = {
+    ...thread,
+    ...patch,
+  };
+  return nextThreads;
+}
+
+function getMessageIndex(
+  messages: ReadonlyArray<OrchestrationMessage>,
+  messageId: MessageId,
+): number | undefined {
+  let indexes = messageIndexCache.get(messages);
+  if (!indexes) {
+    indexes = new Map<MessageId, number>();
+    for (let index = 0; index < messages.length; index += 1) {
+      const message = messages[index];
+      if (message) {
+        indexes.set(message.id, index);
+      }
+    }
+    messageIndexCache.set(messages, indexes);
+  }
+  return indexes.get(messageId);
 }
 
 function decodeForEvent<A>(
@@ -178,7 +233,7 @@ export function projectEvent(
     case "project.created":
       return decodeForEvent(ProjectCreatedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => {
-          const existing = nextBase.projects.find((entry) => entry.id === payload.projectId);
+          const existing = findProjectById(nextBase, payload.projectId);
           const nextProject = {
             id: payload.projectId,
             title: payload.title,
@@ -366,7 +421,7 @@ export function projectEvent(
           event.type,
           "payload",
         );
-        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+        const thread = findThreadById(nextBase, payload.threadId);
         if (!thread) {
           return nextBase;
         }
@@ -387,27 +442,32 @@ export function projectEvent(
           "message",
         );
 
-        const existingMessage = thread.messages.find((entry) => entry.id === message.id);
-        const messages = existingMessage
-          ? thread.messages.map((entry) =>
-              entry.id === message.id
-                ? {
-                    ...entry,
-                    text: message.streaming
-                      ? `${entry.text}${message.text}`
-                      : message.text.length > 0
-                        ? message.text
-                        : entry.text,
-                    streaming: message.streaming,
-                    updatedAt: message.updatedAt,
-                    turnId: message.turnId,
-                    ...(message.attachments !== undefined
-                      ? { attachments: message.attachments }
-                      : {}),
-                  }
-                : entry,
-            )
-          : [...thread.messages, message];
+        const existingMessageIndex = getMessageIndex(thread.messages, message.id);
+        const messages =
+          existingMessageIndex === undefined
+            ? [...thread.messages, message]
+            : (() => {
+                const nextMessages = thread.messages.slice();
+                const existingMessage = nextMessages[existingMessageIndex];
+                if (!existingMessage) {
+                  return nextMessages;
+                }
+                nextMessages[existingMessageIndex] = {
+                  ...existingMessage,
+                  text: message.streaming
+                    ? `${existingMessage.text}${message.text}`
+                    : message.text.length > 0
+                      ? message.text
+                      : existingMessage.text,
+                  streaming: message.streaming,
+                  updatedAt: message.updatedAt,
+                  turnId: message.turnId,
+                  ...(message.attachments !== undefined
+                    ? { attachments: message.attachments }
+                    : {}),
+                };
+                return nextMessages;
+              })();
         const cappedMessages = messages.slice(-MAX_THREAD_MESSAGES);
 
         return {
@@ -427,7 +487,7 @@ export function projectEvent(
           event.type,
           "payload",
         );
-        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+        const thread = findThreadById(nextBase, payload.threadId);
         if (!thread) {
           return nextBase;
         }
@@ -476,7 +536,7 @@ export function projectEvent(
           event.type,
           "payload",
         );
-        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+        const thread = findThreadById(nextBase, payload.threadId);
         if (!thread) {
           return nextBase;
         }
@@ -508,7 +568,7 @@ export function projectEvent(
           event.type,
           "payload",
         );
-        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+        const thread = findThreadById(nextBase, payload.threadId);
         if (!thread) {
           return nextBase;
         }
@@ -571,7 +631,7 @@ export function projectEvent(
     case "thread.reverted":
       return decodeForEvent(ThreadRevertedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => {
-          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          const thread = findThreadById(nextBase, payload.threadId);
           if (!thread) {
             return nextBase;
           }
@@ -627,7 +687,7 @@ export function projectEvent(
         "payload",
       ).pipe(
         Effect.map((payload) => {
-          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          const thread = findThreadById(nextBase, payload.threadId);
           if (!thread) {
             return nextBase;
           }
