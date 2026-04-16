@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "bunx --bun vite",
     "build": "bunx --bun vite build",
-    "prepare": "effect-language-service patch",
+    "prepare": "node ../../scripts/effect-prepare.mjs",
     "preview": "bunx --bun vite preview",
     "typecheck": "tsc --noEmit",
     "test": "bunx --bun vitest run --passWithNoTests",

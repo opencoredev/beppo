@@ -410,6 +410,18 @@ jobs:
           tag_name: ${{ needs.preflight.outputs.tag }}
           target_commitish: ${{ needs.preflight.outputs.ref }}
           name: Beppo v${{ needs.preflight.outputs.version }}
+          body: |
+            > [!IMPORTANT]
+            > macOS builds may be unsigned while Apple Developer signing credentials are unavailable.
+            > If Gatekeeper blocks Beppo on first launch, try the standard right-click open flow first.
+            > If that still fails, run:
+            >
+            > ```bash
+            > xattr -dr com.apple.quarantine /Applications/Beppo.app
+            > ```
+            >
+            > Windows may show a SmartScreen warning for an unknown publisher.
+            > Linux builds may require `chmod +x path/to/Beppo` after extraction.
           generate_release_notes: true
           prerelease: ${{ needs.preflight.outputs.is_prerelease }}
           make_latest: ${{ needs.preflight.outputs.make_latest }}
