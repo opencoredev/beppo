@@ -97,7 +97,10 @@ export function createEnvironmentConnection(
       if (event.type !== "welcome") {
         return;
       }
-      observeEnvironmentIdentity(environmentId, "server lifecycle welcome");
+      observeEnvironmentIdentity(
+        event.payload.environment.environmentId,
+        "server lifecycle welcome",
+      );
       input.onWelcome?.(event.payload);
     },
   );

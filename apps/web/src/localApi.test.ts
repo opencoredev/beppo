@@ -11,6 +11,7 @@ import {
   type TerminalEvent,
   ThreadId,
 } from "@t3tools/contracts";
+import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContextMenuItem } from "@t3tools/contracts";
@@ -617,6 +618,7 @@ describe("wsApi", () => {
     );
 
     await expect(api.persistence.getClientSettings()).resolves.toEqual({
+      ...DEFAULT_CLIENT_SETTINGS,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
       diffWordWrap: true,

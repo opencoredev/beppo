@@ -76,6 +76,20 @@ type SidebarInstanceContextProps = {
 const SidebarContext = React.createContext<SidebarContextProps | null>(null);
 const SidebarInstanceContext = React.createContext<SidebarInstanceContextProps | null>(null);
 
+function matchesSidebarToggleShortcut(
+  event: Pick<
+    KeyboardEvent,
+    "altKey" | "ctrlKey" | "defaultPrevented" | "key" | "metaKey" | "shiftKey"
+  >,
+  shortcutKey: "/" | "\\",
+): boolean {
+  if (event.defaultPrevented) return false;
+  if (event.altKey || event.shiftKey) return false;
+  const hasSingleModifier = event.metaKey !== event.ctrlKey;
+  if (!hasSingleModifier) return false;
+  return event.key === shortcutKey;
+}
+
 function useSidebar() {
   const context = React.useContext(SidebarContext);
   if (!context) {
@@ -990,5 +1004,6 @@ export {
   SidebarRail,
   SidebarSeparator,
   SidebarTrigger,
+  matchesSidebarToggleShortcut,
   useSidebar,
 };
