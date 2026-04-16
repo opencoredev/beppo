@@ -18,6 +18,7 @@ import * as Effect from "effect/Effect";
 import type {
   ContextMenuItem,
   DesktopUpdateActionResult,
+  DesktopUpdateCheckResult,
   DesktopUpdateState,
 } from "@t3tools/contracts";
 import { NetService } from "@t3tools/shared/Net";
@@ -44,6 +45,7 @@ import {
   reduceDesktopUpdateStateOnNoUpdate,
   reduceDesktopUpdateStateOnUpdateAvailable,
 } from "./updateMachine";
+import { getAutoUpdateDisabledReason } from "./updateState";
 import { resolveDesktopRuntimeInfo } from "./runtimeArch";
 
 fixPath();
@@ -53,6 +55,7 @@ const CONFIRM_METHOD = "confirm";
 const CONTEXT_MENU_METHOD = "showContextMenu";
 const OPEN_EXTERNAL_METHOD = "openExternal";
 const UPDATE_GET_STATE_METHOD = "getUpdateState";
+const UPDATE_CHECK_METHOD = "checkForUpdate";
 const UPDATE_DOWNLOAD_METHOD = "downloadUpdate";
 const UPDATE_INSTALL_METHOD = "installUpdate";
 const MICROPHONE_OPEN_SYSTEM_SETTINGS_METHOD = "microphone.openSystemSettings";
@@ -491,6 +494,8 @@ function normalizeUpdaterErrorContext(): DesktopUpdateErrorContext {
 
 async function resolveAutoUpdateEnabled(): Promise<boolean> {
   if (isDevelopment) return false;
+  const disabledByEnv = /^(1|true)$/i.test(process.env.T3CODE_DISABLE_AUTO_UPDATE ?? "");
+  if (disabledByEnv) return false;
 
   try {
     const channel = await Updater.localInfo.channel();
@@ -902,6 +907,14 @@ async function handleBridgeRequest(envelope: DesktopBridgeRequestEnvelope): Prom
     case UPDATE_GET_STATE_METHOD: {
       return updateState;
     }
+    case UPDATE_CHECK_METHOD: {
+      const checkedBefore = updateState.checkedAt;
+      await checkForUpdates("manual");
+      return {
+        checked: updateState.checkedAt !== checkedBefore,
+        state: updateState,
+      } satisfies DesktopUpdateCheckResult;
+    }
     case UPDATE_DOWNLOAD_METHOD: {
       const result = await downloadAvailableUpdate();
       return actionResult(result.accepted, result.completed);
@@ -1154,10 +1167,18 @@ const desktopRuntimeInfo = resolveDesktopRuntimeInfo({
 initializeLogging();
 
 const autoUpdatesEnabled = await resolveAutoUpdateEnabled();
+const autoUpdateDisabledReason = getAutoUpdateDisabledReason({
+  isDevelopment,
+  isPackaged: !isDevelopment,
+  platform: process.platform,
+  appImage: process.env.APPIMAGE,
+  disabledByEnv: /^(1|true)$/i.test(process.env.T3CODE_DISABLE_AUTO_UPDATE ?? ""),
+});
 updateState = {
   ...createInitialDesktopUpdateState(desktopPackageJson.version, desktopRuntimeInfo),
   enabled: autoUpdatesEnabled,
   status: autoUpdatesEnabled ? "idle" : "disabled",
+  message: autoUpdatesEnabled ? null : autoUpdateDisabledReason,
 };
 
 configureApplicationMenu();

@@ -108,6 +108,9 @@
     getUpdateState: function () {
       return request("getUpdateState");
     },
+    checkForUpdate: function () {
+      return request("checkForUpdate");
+    },
     downloadUpdate: function () {
       return request("downloadUpdate");
     },
