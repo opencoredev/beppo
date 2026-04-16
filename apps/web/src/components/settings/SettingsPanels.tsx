@@ -1870,6 +1870,10 @@ export function GeneralSettingsPanel() {
                       Uses the Chat Completions compatibility path. If this endpoint is selected
                       above, Beppo uses it for generated Git and title text only.
                     </p>
+                    <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                      Prefer <code>API key env var</code> for real credentials. Inline API keys are
+                      saved in Beppo&apos;s settings file on disk.
+                    </p>
                   </div>
                 ))}
               </div>

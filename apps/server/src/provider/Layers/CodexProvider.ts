@@ -363,12 +363,11 @@ function parseCodexStatusRateLimits(text: string): Record<string, unknown> | und
       return undefined;
     }
     const usedPercent = Math.max(0, Math.min(100, 100 - remainingPercent));
+    const resetAt = parseCodexStatusResetAt(resetText);
     return {
       usedPercent,
       windowDurationMins,
-      ...(parseCodexStatusResetAt(resetText)
-        ? { resetAt: parseCodexStatusResetAt(resetText) }
-        : {}),
+      ...(resetAt ? { resetAt } : {}),
     };
   };
 
@@ -473,10 +472,17 @@ async function captureCodexStatusWithPty(input: {
       }, 100);
 
       void subprocess.exited.then(() => {
-        if (!settled && markers.some((marker) => output.includes(marker))) {
-          clearInterval(tick);
-          finish(() => resolve(output));
+        if (settled) {
+          return;
         }
+        clearInterval(tick);
+        finish(() => {
+          if (markers.some((marker) => output.includes(marker))) {
+            resolve(output);
+            return;
+          }
+          reject(new Error("Codex process exited before producing status output."));
+        });
       });
     });
   }
@@ -490,6 +496,7 @@ async function captureCodexStatusWithPty(input: {
     let statusSentAt: number | null = null;
     let enterRetries = 0;
     let resendRetries = 0;
+    let tick: ReturnType<typeof setInterval> | null = null;
     const ptyProcess = nodePty.spawn(input.binaryPath, ["-s", "read-only", "-a", "untrusted"], {
       cwd: process.cwd(),
       cols: 200,
@@ -498,59 +505,72 @@ async function captureCodexStatusWithPty(input: {
       name: process.platform === "win32" ? "xterm-color" : "xterm-256color",
     });
 
-    const cleanup = () => {
+    const safeWrite = (value: string) => {
+      try {
+        ptyProcess.write(value);
+      } catch {}
+    };
+
+    let unsubscribeExit: { dispose?: () => void } | undefined;
+
+    const finish = (fn: () => void) => {
       if (settled) return;
       settled = true;
+      if (tick !== null) {
+        clearInterval(tick);
+      }
+      unsubscribeData.dispose?.();
+      unsubscribeExit?.dispose?.();
       try {
         ptyProcess.kill();
       } catch {}
+      fn();
     };
 
     const unsubscribeData = ptyProcess.onData((data) => {
       output += data;
       if (output.includes(cursorQuery)) {
-        ptyProcess.write(cursorResponse);
+        safeWrite(cursorResponse);
       }
       if (markers.some((marker) => output.includes(marker)) && markerSeenAt === null) {
         markerSeenAt = Date.now();
       }
     });
 
-    const unsubscribeExit = ptyProcess.onExit(() => {
-      if (!settled && markers.some((marker) => output.includes(marker))) {
-        clearInterval(tick);
-        cleanup();
-        unsubscribeData.dispose?.();
-        unsubscribeExit.dispose?.();
-        resolve(output);
+    unsubscribeExit = ptyProcess.onExit(() => {
+      if (settled) {
+        return;
       }
+      finish(() => {
+        if (markers.some((marker) => output.includes(marker))) {
+          resolve(output);
+          return;
+        }
+        reject(new Error("Codex process exited before producing status output."));
+      });
     });
 
-    const tick = setInterval(() => {
+    tick = setInterval(() => {
       if (!sentStatus && Date.now() - start >= 300) {
-        ptyProcess.write("/status\n");
+        safeWrite("/status\n");
         sentStatus = true;
         statusSentAt = Date.now();
       }
 
       if (markerSeenAt !== null && Date.now() - markerSeenAt >= 600) {
-        clearInterval(tick);
-        cleanup();
-        unsubscribeData.dispose?.();
-        unsubscribeExit.dispose?.();
-        resolve(output);
+        finish(() => resolve(output));
         return;
       }
 
       if (sentStatus && markerSeenAt === null && statusSentAt !== null) {
         if (Date.now() - statusSentAt >= 1_000 && enterRetries < 2) {
-          ptyProcess.write("\r");
+          safeWrite("\r");
           enterRetries += 1;
           return;
         }
 
         if (Date.now() - statusSentAt >= 2_500 && resendRetries < 1) {
-          ptyProcess.write("/status\n");
+          safeWrite("/status\n");
           resendRetries += 1;
           statusSentAt = Date.now();
           enterRetries = 0;
@@ -559,11 +579,7 @@ async function captureCodexStatusWithPty(input: {
       }
 
       if (Date.now() - start >= CODEX_STATUS_PROBE_TIMEOUT_MS) {
-        clearInterval(tick);
-        cleanup();
-        unsubscribeData.dispose?.();
-        unsubscribeExit.dispose?.();
-        reject(new Error("Codex status probe timed out."));
+        finish(() => reject(new Error("Codex status probe timed out.")));
       }
     }, 100);
   });
