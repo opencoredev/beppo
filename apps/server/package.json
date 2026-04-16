@@ -18,7 +18,7 @@
     "dev": "bun run src/bin.ts",
     "build": "bun scripts/cli.ts build",
     "start": "node dist/bin.mjs",
-    "prepare": "effect-language-service patch",
+    "prepare": "node ../../scripts/effect-prepare.mjs",
     "typecheck": "tsc --noEmit",
     "test": "bunx --bun vitest run"
   },
