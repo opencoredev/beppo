@@ -1,6 +1,6 @@
 {
   "name": "@t3tools/desktop",
-  "version": "0.0.18",
+  "version": "0.0.17",
   "private": true,
   "scripts": {
     "dev": "bunx --bun electrobun dev --watch",

@@ -1,25 +1,33 @@
-import type { ThreadId } from "@t3tools/contracts";
-
 interface TerminalRetentionThread {
-  id: ThreadId;
+  key: string;
   deletedAt: string | null;
+  archivedAt: string | null;
 }
 
 interface CollectActiveTerminalThreadIdsInput {
   snapshotThreads: readonly TerminalRetentionThread[];
-  draftThreadIds: Iterable<ThreadId>;
+  draftThreadKeys: Iterable<string>;
 }
 
 export function collectActiveTerminalThreadIds(
   input: CollectActiveTerminalThreadIdsInput,
-): Set<ThreadId> {
-  const activeThreadIds = new Set<ThreadId>();
+): Set<string> {
+  const activeThreadIds = new Set<string>();
+  const snapshotThreadById = new Map(input.snapshotThreads.map((thread) => [thread.key, thread]));
   for (const thread of input.snapshotThreads) {
     if (thread.deletedAt !== null) continue;
-    activeThreadIds.add(thread.id);
+    if (thread.archivedAt !== null) continue;
+    activeThreadIds.add(thread.key);
   }
-  for (const draftThreadId of input.draftThreadIds) {
-    activeThreadIds.add(draftThreadId);
+  for (const draftThreadKey of input.draftThreadKeys) {
+    const snapshotThread = snapshotThreadById.get(draftThreadKey);
+    if (
+      snapshotThread &&
+      (snapshotThread.deletedAt !== null || snapshotThread.archivedAt !== null)
+    ) {
+      continue;
+    }
+    activeThreadIds.add(draftThreadKey);
   }
   return activeThreadIds;
 }

@@ -10,6 +10,14 @@ import { Effect } from "effect";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 
+interface ReadModelIndexes {
+  readonly projectById: Map<ProjectId, OrchestrationProject>;
+  readonly threadById: Map<ThreadId, OrchestrationThread>;
+  readonly threadsByProjectId: Map<ProjectId, ReadonlyArray<OrchestrationThread>>;
+}
+
+const readModelIndexesCache = new WeakMap<OrchestrationReadModel, ReadModelIndexes>();
+
 function invariantError(commandType: string, detail: string): OrchestrationCommandInvariantError {
   return new OrchestrationCommandInvariantError({
     commandType,
@@ -17,25 +25,59 @@ function invariantError(commandType: string, detail: string): OrchestrationComma
   });
 }
 
+function getReadModelIndexes(readModel: OrchestrationReadModel): ReadModelIndexes {
+  const cached = readModelIndexesCache.get(readModel);
+  if (cached) {
+    return cached;
+  }
+
+  const projectById = new Map<ProjectId, OrchestrationProject>();
+  for (const project of readModel.projects) {
+    projectById.set(project.id, project);
+  }
+
+  const threadById = new Map<ThreadId, OrchestrationThread>();
+  const mutableThreadsByProjectId = new Map<ProjectId, OrchestrationThread[]>();
+  for (const thread of readModel.threads) {
+    threadById.set(thread.id, thread);
+    const existingThreads = mutableThreadsByProjectId.get(thread.projectId);
+    if (existingThreads) {
+      existingThreads.push(thread);
+    } else {
+      mutableThreadsByProjectId.set(thread.projectId, [thread]);
+    }
+  }
+
+  const indexes = {
+    projectById,
+    threadById,
+    threadsByProjectId: new Map<ProjectId, ReadonlyArray<OrchestrationThread>>(
+      mutableThreadsByProjectId,
+    ),
+  } satisfies ReadModelIndexes;
+  readModelIndexesCache.set(readModel, indexes);
+  return indexes;
+}
+
 export function findThreadById(
   readModel: OrchestrationReadModel,
   threadId: ThreadId,
 ): OrchestrationThread | undefined {
-  return readModel.threads.find((thread) => thread.id === threadId);
+  return getReadModelIndexes(readModel).threadById.get(threadId);
 }
 
 export function findProjectById(
   readModel: OrchestrationReadModel,
   projectId: ProjectId,
 ): OrchestrationProject | undefined {
-  return readModel.projects.find((project) => project.id === projectId);
+  return getReadModelIndexes(readModel).projectById.get(projectId);
 }
 
 export function listThreadsByProjectId(
   readModel: OrchestrationReadModel,
   projectId: ProjectId,
 ): ReadonlyArray<OrchestrationThread> {
-  return readModel.threads.filter((thread) => thread.projectId === projectId);
+  return getReadModelIndexes(readModel).threadsByProjectId.get(projectId) ?? [];
 }
 
 export function requireProject(input: {

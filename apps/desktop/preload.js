@@ -120,5 +120,10 @@
         updateStateListeners.delete(listener);
       };
     },
+    microphone: {
+      openSystemSettings: function () {
+        return request("microphone.openSystemSettings");
+      },
+    },
   };
 })();

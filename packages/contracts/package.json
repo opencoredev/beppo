@@ -1,6 +1,6 @@
 {
   "name": "@t3tools/contracts",
-  "version": "0.0.18",
+  "version": "0.0.17",
   "private": true,
   "files": [
     "dist"
@@ -24,7 +24,7 @@
   "scripts": {
     "dev": "bunx --bun tsdown src/index.ts --format esm,cjs --dts --watch --clean",
     "build": "bunx --bun tsdown src/index.ts --format esm,cjs --dts --clean",
-    "prepare": "effect-language-service patch",
+    "prepare": "node ../../scripts/effect-prepare.mjs",
     "typecheck": "tsc --noEmit",
     "test": "bunx --bun vitest run"
   },

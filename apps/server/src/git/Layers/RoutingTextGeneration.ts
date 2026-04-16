@@ -9,7 +9,7 @@
  *
  * @module RoutingTextGeneration
  */
-import { Effect, Layer, ServiceMap } from "effect";
+import { Effect, Layer, Context } from "effect";
 
 import {
   TextGeneration,
@@ -18,18 +18,24 @@ import {
 } from "../Services/TextGeneration.ts";
 import { CodexTextGenerationLive } from "./CodexTextGeneration.ts";
 import { ClaudeTextGenerationLive } from "./ClaudeTextGeneration.ts";
+import { OpenAICompatibleTextGenerationLive } from "./OpenAICompatibleTextGeneration.ts";
 
 // ---------------------------------------------------------------------------
 // Internal service tags so both concrete layers can coexist.
 // ---------------------------------------------------------------------------
 
-class CodexTextGen extends ServiceMap.Service<CodexTextGen, TextGenerationShape>()(
+class CodexTextGen extends Context.Service<CodexTextGen, TextGenerationShape>()(
   "t3/git/Layers/RoutingTextGeneration/CodexTextGen",
 ) {}
 
-class ClaudeTextGen extends ServiceMap.Service<ClaudeTextGen, TextGenerationShape>()(
+class ClaudeTextGen extends Context.Service<ClaudeTextGen, TextGenerationShape>()(
   "t3/git/Layers/RoutingTextGeneration/ClaudeTextGen",
 ) {}
+
+class OpenAICompatibleTextGen extends Context.Service<
+  OpenAICompatibleTextGen,
+  TextGenerationShape
+>()("t3/git/Layers/RoutingTextGeneration/OpenAICompatibleTextGen") {}
 
 // ---------------------------------------------------------------------------
 // Routing implementation
@@ -38,9 +44,19 @@ class ClaudeTextGen extends ServiceMap.Service<ClaudeTextGen, TextGenerationShap
 const makeRoutingTextGeneration = Effect.gen(function* () {
   const codex = yield* CodexTextGen;
   const claude = yield* ClaudeTextGen;
+  const openaiCompatible = yield* OpenAICompatibleTextGen;
 
-  const route = (provider?: TextGenerationProvider): TextGenerationShape =>
-    provider === "claudeAgent" ? claude : codex;
+  const route = (provider?: TextGenerationProvider): TextGenerationShape => {
+    switch (provider) {
+      case "claudeAgent":
+        return claude;
+      case "openaiCompatible":
+        return openaiCompatible;
+      case "codex":
+      default:
+        return codex;
+    }
+  };
 
   return {
     generateCommitMessage: (input) =>
@@ -67,7 +83,19 @@ const InternalClaudeLayer = Layer.effect(
   }),
 ).pipe(Layer.provide(ClaudeTextGenerationLive));
 
+const InternalOpenAICompatibleLayer = Layer.effect(
+  OpenAICompatibleTextGen,
+  Effect.gen(function* () {
+    const svc = yield* TextGeneration;
+    return svc;
+  }),
+).pipe(Layer.provide(OpenAICompatibleTextGenerationLive));
+
 export const RoutingTextGenerationLive = Layer.effect(
   TextGeneration,
   makeRoutingTextGeneration,
-).pipe(Layer.provide(InternalCodexLayer), Layer.provide(InternalClaudeLayer));
+).pipe(
+  Layer.provide(InternalCodexLayer),
+  Layer.provide(InternalClaudeLayer),
+  Layer.provide(InternalOpenAICompatibleLayer),
+);

@@ -37,6 +37,7 @@ const TERMINAL_WORD_BACKWARD = "\u001bb";
 const TERMINAL_WORD_FORWARD = "\u001bf";
 const TERMINAL_LINE_START = "\u0001";
 const TERMINAL_LINE_END = "\u0005";
+const TERMINAL_DELETE_TO_LINE_START = "\u0015";
 const EVENT_CODE_KEY_ALIASES: Readonly<Record<string, readonly string[]>> = {
   BracketLeft: ["["],
   BracketRight: ["]"],
@@ -72,7 +73,7 @@ function resolveEventKeys(event: ShortcutEventLike): Set<string> {
 function matchesShortcutModifiers(
   event: ShortcutEventLike,
   shortcut: KeybindingShortcut,
-  platform = navigator.platform,
+  platform: string = navigator.platform,
 ): boolean {
   const useMetaForMod = isMacPlatform(platform);
   const expectedMeta = shortcut.metaKey || (shortcut.modKey && useMetaForMod);
@@ -88,7 +89,7 @@ function matchesShortcutModifiers(
 function matchesShortcut(
   event: ShortcutEventLike,
   shortcut: KeybindingShortcut,
-  platform = navigator.platform,
+  platform: string = navigator.platform,
 ): boolean {
   if (!matchesShortcutModifiers(event, shortcut, platform)) return false;
   return resolveEventKeys(event).has(shortcut.key);
@@ -129,7 +130,10 @@ function matchesWhenClause(
   return evaluateWhenNode(whenAst, context);
 }
 
-function shortcutConflictKey(shortcut: KeybindingShortcut, platform = navigator.platform): string {
+function shortcutConflictKey(
+  shortcut: KeybindingShortcut,
+  platform: string = navigator.platform,
+): string {
   const useMetaForMod = isMacPlatform(platform);
   const metaKey = shortcut.metaKey || (shortcut.modKey && useMetaForMod);
   const ctrlKey = shortcut.ctrlKey || (shortcut.modKey && !useMetaForMod);
@@ -211,7 +215,7 @@ function formatShortcutKeyLabel(key: string): string {
 
 export function formatShortcutLabel(
   shortcut: KeybindingShortcut,
-  platform = navigator.platform,
+  platform: string = navigator.platform,
 ): string {
   const keyLabel = formatShortcutKeyLabel(shortcut.key);
   const useMetaForMod = isMacPlatform(platform);
@@ -368,6 +372,28 @@ export function isTerminalClearShortcut(
     !event.altKey &&
     !event.shiftKey
   );
+}
+
+export function terminalDeleteShortcutData(
+  event: ShortcutEventLike,
+  platform = navigator.platform,
+): string | null {
+  if (event.type !== undefined && event.type !== "keydown") {
+    return null;
+  }
+
+  if (!isMacPlatform(platform)) {
+    return null;
+  }
+
+  const key = normalizeEventKey(event.key);
+  if (key !== "backspace") {
+    return null;
+  }
+
+  return event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey
+    ? TERMINAL_DELETE_TO_LINE_START
+    : null;
 }
 
 export function terminalNavigationShortcutData(

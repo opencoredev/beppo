@@ -17,6 +17,7 @@ import {
 const baseState: DesktopUpdateState = {
   enabled: true,
   status: "idle",
+  channel: "latest",
   currentVersion: "1.0.0",
   hostArch: "x64",
   appArch: "x64",
@@ -212,7 +213,7 @@ describe("desktop update UI helpers", () => {
         availableVersion: "1.1.0",
         downloadedVersion: "1.1.1",
       }),
-    ).toContain("Install update 1.1.1 and restart Beppo?");
+    ).toContain("Install update 1.1.1 and restart T3 Code?");
   });
 
   it("falls back to generic install confirmation copy when no version is available", () => {
@@ -221,7 +222,7 @@ describe("desktop update UI helpers", () => {
         availableVersion: null,
         downloadedVersion: null,
       }),
-    ).toContain("Install update and restart Beppo?");
+    ).toContain("Install update and restart T3 Code?");
   });
 });
 

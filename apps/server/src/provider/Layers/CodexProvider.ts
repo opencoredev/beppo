@@ -5,6 +5,7 @@ import type {
   ServerProvider,
   ServerProviderModel,
   ServerProviderAuth,
+  ServerProviderSkill,
   ServerProviderState,
 } from "@t3tools/contracts";
 import {
@@ -17,6 +18,7 @@ import {
   Option,
   Path,
   Result,
+  Schema,
   Stream,
 } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
@@ -44,10 +46,24 @@ import {
   codexAuthSubType,
   type CodexAccountSnapshot,
 } from "../codexAccount";
-import { probeCodexAccount } from "../codexAppServer";
+import { probeCodexDiscovery } from "../codexAppServer";
 import { CodexProvider } from "../Services/CodexProvider";
 import { ServerSettingsService } from "../../serverSettings";
 import { ServerSettingsError } from "@t3tools/contracts";
+import { ensureNodePtySpawnHelperExecutable } from "../../terminal/Layers/NodePTY";
+
+const DEFAULT_CODEX_MODEL_CAPABILITIES: ModelCapabilities = {
+  reasoningEffortLevels: [
+    { value: "xhigh", label: "Extra High" },
+    { value: "high", label: "High", isDefault: true },
+    { value: "medium", label: "Medium" },
+    { value: "low", label: "Low" },
+  ],
+  supportsFastMode: true,
+  supportsThinkingToggle: false,
+  contextWindowOptions: [],
+  promptInjectedEffortLevels: [],
+};
 
 const PROVIDER = "codex" as const;
 const OPENAI_AUTH_PROVIDERS = new Set(["openai"]);
@@ -159,13 +175,8 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
 export function getCodexModelCapabilities(model: string | null | undefined): ModelCapabilities {
   const slug = model?.trim();
   return (
-    BUILT_IN_MODELS.find((candidate) => candidate.slug === slug)?.capabilities ?? {
-      reasoningEffortLevels: [],
-      supportsFastMode: false,
-      supportsThinkingToggle: false,
-      contextWindowOptions: [],
-      promptInjectedEffortLevels: [],
-    }
+    BUILT_IN_MODELS.find((candidate) => candidate.slug === slug)?.capabilities ??
+    DEFAULT_CODEX_MODEL_CAPABILITIES
   );
 }
 
@@ -292,12 +303,318 @@ export const hasCustomModelProvider = readCodexConfigModelProvider().pipe(
 );
 
 const CAPABILITIES_PROBE_TIMEOUT_MS = 8_000;
+const CODEX_STATUS_PROBE_TIMEOUT_MS = 8_000;
+const ANSI_ESCAPE_PATTERN = new RegExp(String.raw`\u001B\[[0-9;?]*[A-Za-z]`, "g");
+
+class CodexStatusProbeError extends Schema.TaggedErrorClass<CodexStatusProbeError>()(
+  "CodexStatusProbeError",
+  {
+    detail: Schema.String,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+function parseCodexStatusResetAt(raw: string | undefined, now = new Date()): string | undefined {
+  const text = raw?.trim();
+  if (!text) {
+    return undefined;
+  }
+
+  const normalized = text.replace(/^resets?\s+/i, "").trim();
+  const timeAndDate = normalized.match(
+    /^(\d{1,2}:\d{2}) on (\d{1,2} [A-Za-z]{3}|[A-Za-z]{3} \d{1,2})$/,
+  );
+  if (timeAndDate) {
+    const [, time, datePart] = timeAndDate;
+    const candidate = new Date(`${datePart} ${now.getFullYear()} ${time}`);
+    if (!Number.isNaN(candidate.getTime())) {
+      if (candidate.getTime() < now.getTime()) {
+        candidate.setFullYear(candidate.getFullYear() + 1);
+      }
+      return candidate.toISOString();
+    }
+  }
+
+  const timeOnly = normalized.match(/^(\d{1,2}:\d{2})$/);
+  if (timeOnly) {
+    const [hoursText, minutesText] = timeOnly[1]!.split(":");
+    const candidate = new Date(now);
+    candidate.setSeconds(0, 0);
+    candidate.setHours(Number(hoursText), Number(minutesText), 0, 0);
+    if (candidate.getTime() < now.getTime()) {
+      candidate.setDate(candidate.getDate() + 1);
+    }
+    return candidate.toISOString();
+  }
+
+  return undefined;
+}
+
+function parseCodexStatusRateLimits(text: string): Record<string, unknown> | undefined {
+  const clean = text.replace(ANSI_ESCAPE_PATTERN, "");
+  const fiveHourMatch = clean.match(
+    /(?:5h|5-hour) limit:[^\n]*?(\d{1,3})%\s+left(?:\s*\((?:resets?\s+)?([^)]+)\))?/i,
+  );
+  const weeklyMatch = clean.match(
+    /Weekly limit:[^\n]*?(\d{1,3})%\s+left(?:\s*\((?:resets?\s+)?([^)]+)\))?/i,
+  );
+
+  const toEntry = (
+    remainingPercentText: string | undefined,
+    windowDurationMins: number,
+    resetText: string | undefined,
+  ) => {
+    if (!remainingPercentText) {
+      return undefined;
+    }
+    const remainingPercent = Number.parseInt(remainingPercentText, 10);
+    if (!Number.isFinite(remainingPercent)) {
+      return undefined;
+    }
+    const usedPercent = Math.max(0, Math.min(100, 100 - remainingPercent));
+    return {
+      usedPercent,
+      windowDurationMins,
+      ...(parseCodexStatusResetAt(resetText)
+        ? { resetAt: parseCodexStatusResetAt(resetText) }
+        : {}),
+    };
+  };
+
+  const primary = toEntry(fiveHourMatch?.[1], 300, fiveHourMatch?.[2]);
+  const secondary = toEntry(weeklyMatch?.[1], 10_080, weeklyMatch?.[2]);
+  if (!primary && !secondary) {
+    return undefined;
+  }
+
+  return {
+    rateLimits: {
+      ...(primary ? { primary } : {}),
+      ...(secondary ? { secondary } : {}),
+    },
+  };
+}
+
+async function captureCodexStatusWithPty(input: {
+  readonly binaryPath: string;
+  readonly homePath?: string;
+}): Promise<string> {
+  const env = {
+    ...process.env,
+    ...(input.homePath ? { CODEX_HOME: input.homePath } : {}),
+  };
+  const markers = ["5h limit", "5-hour limit", "Weekly limit", "Credits:"];
+  const cursorQuery = "\u001b[6n";
+  const cursorResponse = "\u001b[1;1R";
+  const start = Date.now();
+
+  if (typeof Bun !== "undefined" && process.platform !== "win32") {
+    const decoder = new TextDecoder();
+    return await new Promise<string>((resolve, reject) => {
+      let output = "";
+      let sentStatus = false;
+      let settled = false;
+      let markerSeenAt: number | null = null;
+      let statusSentAt: number | null = null;
+      let enterRetries = 0;
+      let resendRetries = 0;
+      const subprocess = Bun.spawn([input.binaryPath, "-s", "read-only", "-a", "untrusted"], {
+        cwd: process.cwd(),
+        env,
+        terminal: {
+          cols: 200,
+          rows: 60,
+          data(_terminal, data) {
+            const text = decoder.decode(data, { stream: true });
+            output += text;
+            if (output.includes(cursorQuery)) {
+              subprocess.terminal?.write(cursorResponse);
+            }
+            if (markers.some((marker) => output.includes(marker)) && markerSeenAt === null) {
+              markerSeenAt = Date.now();
+            }
+          },
+        },
+      });
+
+      const finish = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        try {
+          subprocess.kill();
+        } catch {}
+        fn();
+      };
+
+      const tick = setInterval(() => {
+        if (!sentStatus && Date.now() - start >= 300) {
+          subprocess.terminal?.write("/status\n");
+          sentStatus = true;
+          statusSentAt = Date.now();
+        }
+
+        if (markerSeenAt !== null && Date.now() - markerSeenAt >= 600) {
+          clearInterval(tick);
+          finish(() => resolve(output));
+          return;
+        }
+
+        if (sentStatus && markerSeenAt === null && statusSentAt !== null) {
+          if (Date.now() - statusSentAt >= 1_000 && enterRetries < 2) {
+            subprocess.terminal?.write("\r");
+            enterRetries += 1;
+            return;
+          }
+
+          if (Date.now() - statusSentAt >= 2_500 && resendRetries < 1) {
+            subprocess.terminal?.write("/status\n");
+            resendRetries += 1;
+            statusSentAt = Date.now();
+            enterRetries = 0;
+            return;
+          }
+        }
+
+        if (Date.now() - start >= CODEX_STATUS_PROBE_TIMEOUT_MS) {
+          clearInterval(tick);
+          finish(() => reject(new Error("Codex status probe timed out.")));
+        }
+      }, 100);
+
+      void subprocess.exited.then(() => {
+        if (!settled && markers.some((marker) => output.includes(marker))) {
+          clearInterval(tick);
+          finish(() => resolve(output));
+        }
+      });
+    });
+  }
+
+  const nodePty = await import("node-pty");
+  return await new Promise<string>((resolve, reject) => {
+    let output = "";
+    let sentStatus = false;
+    let settled = false;
+    let markerSeenAt: number | null = null;
+    let statusSentAt: number | null = null;
+    let enterRetries = 0;
+    let resendRetries = 0;
+    const ptyProcess = nodePty.spawn(input.binaryPath, ["-s", "read-only", "-a", "untrusted"], {
+      cwd: process.cwd(),
+      cols: 200,
+      rows: 60,
+      env,
+      name: process.platform === "win32" ? "xterm-color" : "xterm-256color",
+    });
+
+    const cleanup = () => {
+      if (settled) return;
+      settled = true;
+      try {
+        ptyProcess.kill();
+      } catch {}
+    };
+
+    const unsubscribeData = ptyProcess.onData((data) => {
+      output += data;
+      if (output.includes(cursorQuery)) {
+        ptyProcess.write(cursorResponse);
+      }
+      if (markers.some((marker) => output.includes(marker)) && markerSeenAt === null) {
+        markerSeenAt = Date.now();
+      }
+    });
+
+    const unsubscribeExit = ptyProcess.onExit(() => {
+      if (!settled && markers.some((marker) => output.includes(marker))) {
+        clearInterval(tick);
+        cleanup();
+        unsubscribeData.dispose?.();
+        unsubscribeExit.dispose?.();
+        resolve(output);
+      }
+    });
+
+    const tick = setInterval(() => {
+      if (!sentStatus && Date.now() - start >= 300) {
+        ptyProcess.write("/status\n");
+        sentStatus = true;
+        statusSentAt = Date.now();
+      }
+
+      if (markerSeenAt !== null && Date.now() - markerSeenAt >= 600) {
+        clearInterval(tick);
+        cleanup();
+        unsubscribeData.dispose?.();
+        unsubscribeExit.dispose?.();
+        resolve(output);
+        return;
+      }
+
+      if (sentStatus && markerSeenAt === null && statusSentAt !== null) {
+        if (Date.now() - statusSentAt >= 1_000 && enterRetries < 2) {
+          ptyProcess.write("\r");
+          enterRetries += 1;
+          return;
+        }
+
+        if (Date.now() - statusSentAt >= 2_500 && resendRetries < 1) {
+          ptyProcess.write("/status\n");
+          resendRetries += 1;
+          statusSentAt = Date.now();
+          enterRetries = 0;
+          return;
+        }
+      }
+
+      if (Date.now() - start >= CODEX_STATUS_PROBE_TIMEOUT_MS) {
+        clearInterval(tick);
+        cleanup();
+        unsubscribeData.dispose?.();
+        unsubscribeExit.dispose?.();
+        reject(new Error("Codex status probe timed out."));
+      }
+    }, 100);
+  });
+}
+
+const probeCodexRateLimits = Effect.fn("probeCodexRateLimits")(function* (input: {
+  readonly binaryPath: string;
+  readonly homePath?: string;
+}) {
+  if (typeof Bun === "undefined") {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    yield* ensureNodePtySpawnHelperExecutable().pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+      Effect.orElseSucceed(() => undefined),
+    );
+  }
+
+  const result = yield* Effect.tryPromise({
+    try: () => captureCodexStatusWithPty(input),
+    catch: (cause) =>
+      new CodexStatusProbeError({
+        detail:
+          cause instanceof Error ? cause.message : `Codex status probe failed: ${String(cause)}`,
+        cause,
+      }),
+  }).pipe(Effect.option);
+
+  if (Option.isNone(result)) {
+    return undefined;
+  }
+
+  return parseCodexStatusRateLimits(result.value);
+});
 
 const probeCodexCapabilities = (input: {
   readonly binaryPath: string;
   readonly homePath?: string;
+  readonly cwd: string;
 }) =>
-  Effect.tryPromise((signal) => probeCodexAccount({ ...input, signal })).pipe(
+  Effect.tryPromise((signal) => probeCodexDiscovery({ ...input, signal })).pipe(
     Effect.timeoutOption(CAPABILITIES_PROBE_TIMEOUT_MS),
     Effect.result,
     Effect.map((result) => {
@@ -326,6 +643,15 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     readonly binaryPath: string;
     readonly homePath?: string;
   }) => Effect.Effect<CodexAccountSnapshot | undefined>,
+  resolveSkills?: (input: {
+    readonly binaryPath: string;
+    readonly homePath?: string;
+    readonly cwd: string;
+  }) => Effect.Effect<ReadonlyArray<ServerProviderSkill> | undefined>,
+  resolveRateLimits?: (input: {
+    readonly binaryPath: string;
+    readonly homePath?: string;
+  }) => Effect.Effect<unknown, never, FileSystem.FileSystem | Path.Path>,
 ): Effect.fn.Return<
   ServerProvider,
   ServerSettingsError,
@@ -339,7 +665,12 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     Effect.map((settings) => settings.providers.codex),
   );
   const checkedAt = new Date().toISOString();
-  const models = providerModelsFromSettings(BUILT_IN_MODELS, PROVIDER, codexSettings.customModels);
+  const models = providerModelsFromSettings(
+    BUILT_IN_MODELS,
+    PROVIDER,
+    codexSettings.customModels,
+    DEFAULT_CODEX_MODEL_CAPABILITIES,
+  );
 
   if (!codexSettings.enabled) {
     return buildServerProvider({
@@ -376,7 +707,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
         auth: { status: "unknown" },
         message: isCommandMissingCause(error, codexSettings.binaryPath)
           ? "Codex CLI (`codex`) is not installed or not on PATH."
-          : `Failed to execute Codex CLI health check: ${error instanceof Error ? error.message : String(error)}.`,
+          : `Failed to execute Codex CLI health check: ${error.message}.`,
       },
     });
   }
@@ -436,12 +767,22 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     });
   }
 
+  const skills =
+    (resolveSkills
+      ? yield* resolveSkills({
+          binaryPath: codexSettings.binaryPath,
+          homePath: codexSettings.homePath,
+          cwd: process.cwd(),
+        }).pipe(Effect.orElseSucceed(() => undefined))
+      : undefined) ?? [];
+
   if (yield* hasCustomModelProvider) {
     return buildServerProvider({
       provider: PROVIDER,
       enabled: codexSettings.enabled,
       checkedAt,
       models,
+      skills,
       probe: {
         installed: true,
         version: parsedVersion,
@@ -471,15 +812,13 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
       enabled: codexSettings.enabled,
       checkedAt,
       models: resolvedModels,
+      skills,
       probe: {
         installed: true,
         version: parsedVersion,
         status: "warning",
         auth: { status: "unknown" },
-        message:
-          error instanceof Error
-            ? `Could not verify Codex authentication status: ${error.message}.`
-            : "Could not verify Codex authentication status.",
+        message: `Could not verify Codex authentication status: ${error.message}.`,
       },
     });
   }
@@ -490,6 +829,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
       enabled: codexSettings.enabled,
       checkedAt,
       models: resolvedModels,
+      skills,
       probe: {
         installed: true,
         version: parsedVersion,
@@ -503,11 +843,19 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   const parsed = parseAuthStatusFromOutput(authProbe.success.value);
   const authType = codexAuthSubType(account);
   const authLabel = codexAuthSubLabel(account);
+  const rateLimits =
+    parsed.auth.status === "authenticated" && resolveRateLimits
+      ? yield* resolveRateLimits({
+          binaryPath: codexSettings.binaryPath,
+          ...(codexSettings.homePath ? { homePath: codexSettings.homePath } : {}),
+        }).pipe(Effect.orElseSucceed(() => undefined))
+      : undefined;
   return buildServerProvider({
     provider: PROVIDER,
     enabled: codexSettings.enabled,
     checkedAt,
     models: resolvedModels,
+    skills,
     probe: {
       installed: true,
       version: parsedVersion,
@@ -519,8 +867,49 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
       },
       ...(parsed.message ? { message: parsed.message } : {}),
     },
+    ...(rateLimits ? { rateLimits } : {}),
   });
 });
+
+const makePendingCodexProvider = (codexSettings: CodexSettings): ServerProvider => {
+  const checkedAt = new Date().toISOString();
+  const models = providerModelsFromSettings(
+    BUILT_IN_MODELS,
+    PROVIDER,
+    codexSettings.customModels,
+    DEFAULT_CODEX_MODEL_CAPABILITIES,
+  );
+
+  if (!codexSettings.enabled) {
+    return buildServerProvider({
+      provider: PROVIDER,
+      enabled: false,
+      checkedAt,
+      models,
+      probe: {
+        installed: false,
+        version: null,
+        status: "warning",
+        auth: { status: "unknown" },
+        message: "Codex is disabled in Beppo settings.",
+      },
+    });
+  }
+
+  return buildServerProvider({
+    provider: PROVIDER,
+    enabled: true,
+    checkedAt,
+    models,
+    probe: {
+      installed: false,
+      version: null,
+      status: "warning",
+      auth: { status: "unknown" },
+      message: "Codex provider status has not been checked in this session yet.",
+    },
+  });
+};
 
 export const CodexProviderLive = Layer.effect(
   CodexProvider,
@@ -533,16 +922,30 @@ export const CodexProviderLive = Layer.effect(
       capacity: 4,
       timeToLive: Duration.minutes(5),
       lookup: (key: string) => {
-        const [binaryPath, homePath] = JSON.parse(key) as [string, string | undefined];
+        const [binaryPath, homePath, cwd] = JSON.parse(key) as [string, string | undefined, string];
         return probeCodexCapabilities({
           binaryPath,
+          cwd,
           ...(homePath ? { homePath } : {}),
         });
       },
     });
 
-    const checkProvider = checkCodexProviderStatus((input) =>
-      Cache.get(accountProbeCache, JSON.stringify([input.binaryPath, input.homePath])),
+    const getDiscovery = (input: {
+      readonly binaryPath: string;
+      readonly homePath?: string;
+      readonly cwd: string;
+    }) =>
+      Cache.get(accountProbeCache, JSON.stringify([input.binaryPath, input.homePath, input.cwd]));
+
+    const checkProvider = checkCodexProviderStatus(
+      (input) =>
+        getDiscovery({
+          ...input,
+          cwd: process.cwd(),
+        }).pipe(Effect.map((discovery) => discovery?.account)),
+      (input) => getDiscovery(input).pipe(Effect.map((discovery) => discovery?.skills)),
+      (input) => probeCodexRateLimits(input),
     ).pipe(
       Effect.provideService(ServerSettingsService, serverSettings),
       Effect.provideService(FileSystem.FileSystem, fileSystem),
@@ -559,6 +962,7 @@ export const CodexProviderLive = Layer.effect(
         Stream.map((settings) => settings.providers.codex),
       ),
       haveSettingsChanged: (previous, next) => !Equal.equals(previous, next),
+      initialSnapshot: makePendingCodexProvider,
       checkProvider,
     });
   }),

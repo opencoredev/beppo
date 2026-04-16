@@ -2,7 +2,7 @@ import { KeybindingCommand, KeybindingRule, KeybindingsConfig } from "@t3tools/c
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { assertFailure } from "@effect/vitest/utils";
-import { Effect, FileSystem, Layer, Logger, Path, Schema } from "effect";
+import { Cause, Effect, FileSystem, Layer, Logger, Path, Schema } from "effect";
 import { ServerConfig } from "./config";
 
 import {
@@ -146,6 +146,23 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
           when: `${"!".repeat(300)}terminalFocus`,
         }),
       );
+    }),
+  );
+
+  it.effect("formats invalid resolved keybinding rules with the custom message", () =>
+    Effect.sync(() => {
+      const result = Schema.decodeUnknownExit(ResolvedKeybindingFromConfig)({
+        key: "mod+shift+d+o",
+        command: "terminal.new",
+      });
+
+      if (result._tag !== "Failure") {
+        assert.fail("Expected invalid keybinding decode to fail");
+      }
+
+      const detail = Cause.pretty(result.cause);
+      assert.isTrue(detail.includes("Invalid keybinding rule"));
+      assert.isFalse(detail.includes("Invalid data"));
     }),
   );
 
@@ -468,6 +485,37 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
 
       assert.isTrue(loadedAfterUpsert.some((entry) => entry.command === "script.run-tests.run"));
       assert.isTrue(loadedAfterUpsert.some((entry) => entry.command === "terminal.toggle"));
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("sanitizes invalid keybinding entries on startup and persists the cleaned config", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      yield* fileSystem.makeDirectory(path.dirname(keybindingsConfigPath), { recursive: true });
+      yield* fileSystem.writeFileString(
+        keybindingsConfigPath,
+        JSON.stringify(
+          [
+            { key: "mod+j", command: "terminal.toggle" },
+            { key: "mod+shift+1", command: "view.chat" },
+            { key: "mod+k", command: "palette.open", when: "!terminalFocus" },
+          ],
+          null,
+          2,
+        ),
+      );
+
+      yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings;
+        yield* keybindings.syncDefaultKeybindingsOnStartup;
+      });
+
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.isFalse(persisted.some((entry) => String(entry.command) === "view.chat"));
+      assert.isTrue(persisted.some((entry) => entry.command === "terminal.toggle"));
+      assert.isTrue(persisted.some((entry) => entry.command === "palette.open"));
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 

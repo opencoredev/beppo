@@ -44,7 +44,7 @@ import {
   reduceDesktopUpdateStateOnNoUpdate,
   reduceDesktopUpdateStateOnUpdateAvailable,
 } from "./updateMachine";
-import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
+import { resolveDesktopRuntimeInfo } from "./runtimeArch";
 
 fixPath();
 
@@ -55,6 +55,7 @@ const OPEN_EXTERNAL_METHOD = "openExternal";
 const UPDATE_GET_STATE_METHOD = "getUpdateState";
 const UPDATE_DOWNLOAD_METHOD = "downloadUpdate";
 const UPDATE_INSTALL_METHOD = "installUpdate";
+const MICROPHONE_OPEN_SYSTEM_SETTINGS_METHOD = "microphone.openSystemSettings";
 
 const MENU_ACTION_EVENT = "menu-action";
 const UPDATE_STATE_EVENT = "update-state";
@@ -209,6 +210,25 @@ function writeBackendSessionBoundary(phase: "START" | "END", details: string): v
 
 function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function openMicrophoneSystemSettings(): Promise<boolean> {
+  const url =
+    process.platform === "darwin"
+      ? "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+      : process.platform === "win32"
+        ? "ms-settings:privacy-microphone"
+        : null;
+
+  if (!url) {
+    return false;
+  }
+
+  try {
+    return Boolean(await Utils.openExternal(url));
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -809,11 +829,15 @@ async function handleBridgeRequest(envelope: DesktopBridgeRequestEnvelope): Prom
             : OS.homedir(),
         canChooseFiles: false,
         canChooseDirectory: true,
+        canChooseDirectories: true,
         allowsMultipleSelection: false,
       });
-      const selected = Array.isArray(result)
-        ? result.find((entry: unknown) => typeof entry === "string" && entry.trim().length > 0)
-        : null;
+      const selected =
+        typeof result === "string" && result.trim().length > 0
+          ? result
+          : Array.isArray(result)
+            ? result.find((entry: unknown) => typeof entry === "string" && entry.trim().length > 0)
+            : null;
       writeDesktopLog(
         `bridge pickFolder result=${typeof selected === "string" ? selected : "<empty>"}`,
       );
@@ -886,21 +910,40 @@ async function handleBridgeRequest(envelope: DesktopBridgeRequestEnvelope): Prom
       const result = await installDownloadedUpdate();
       return actionResult(result.accepted, result.completed);
     }
+    case MICROPHONE_OPEN_SYSTEM_SETTINGS_METHOD: {
+      return await openMicrophoneSystemSettings();
+    }
     default:
       throw new Error(`Unknown desktop bridge method: ${envelope.method}`);
   }
 }
 
 function configureApplicationMenu(): void {
+  const fileMenu = {
+    label: "File",
+    submenu: [
+      { label: "Settings...", action: "open-settings", accelerator: "CmdOrCtrl+," },
+      { type: "separator" },
+      ...(process.platform === "darwin"
+        ? [{ role: "close" }]
+        : [{ label: "Quit", action: "quit-app", accelerator: "CmdOrCtrl+Q" }]),
+    ],
+  };
+
   ApplicationMenu.setApplicationMenu([
-    {
-      label: "File",
-      submenu: [
-        { label: "Settings...", action: "open-settings", accelerator: "CmdOrCtrl+," },
-        { type: "separator" },
-        { role: process.platform === "darwin" ? "close" : "quit" },
-      ],
-    },
+    ...(process.platform === "darwin"
+      ? [
+          {
+            label: APP_DISPLAY_NAME,
+            submenu: [
+              { label: `About ${APP_DISPLAY_NAME}`, role: "about" },
+              { type: "separator" },
+              { label: "Quit", action: "quit-app", accelerator: "CmdOrCtrl+Q" },
+            ],
+          },
+        ]
+      : []),
+    fileMenu,
     { role: "editMenu" },
     { role: "viewMenu" },
     { role: "windowMenu" },
@@ -919,6 +962,11 @@ function configureApplicationMenu(): void {
       return;
     }
 
+    if (action === "quit-app") {
+      await requestApplicationQuit();
+      return;
+    }
+
     if (action.length > 0) {
       broadcastBridgeEvent(MENU_ACTION_EVENT, action);
       if (mainWindow) {
@@ -926,6 +974,22 @@ function configureApplicationMenu(): void {
       }
     }
   });
+}
+
+async function requestApplicationQuit(): Promise<void> {
+  if (isQuitting) {
+    return;
+  }
+
+  const confirmed = await showDesktopConfirmDialog(`Quit ${APP_DISPLAY_NAME} now?`);
+  if (!confirmed) {
+    return;
+  }
+
+  isQuitting = true;
+  clearUpdateTimers();
+  stopBackend();
+  Utils.quit();
 }
 
 function configureContextMenuListener(): void {
@@ -972,7 +1036,13 @@ function createWindow(): DesktopWindow {
   // when started from a terminal, so explicitly show/focus the first window.
   window.show();
   window.focus();
-  activateMacAppBundle();
+  // In dev mode, skip activateMacAppBundle — calling `open -b <bundle-id>` when the
+  // dev-built .app bundle exists on disk causes macOS to spawn a second app instance,
+  // resulting in two Beppo windows. The window.show()/focus() above is sufficient for
+  // dev-mode visibility. In production the app is launched by the OS normally.
+  if (!isDevelopment) {
+    activateMacAppBundle();
+  }
 
   window.webview.on("dom-ready", () => {
     writeDesktopLog(`window dom-ready id=${window.id}`);
@@ -1085,7 +1155,7 @@ initializeLogging();
 
 const autoUpdatesEnabled = await resolveAutoUpdateEnabled();
 updateState = {
-  ...createInitialDesktopUpdateState(desktopPackageJson.version, desktopRuntimeInfo),
+  ...createInitialDesktopUpdateState(desktopPackageJson.version, desktopRuntimeInfo, "latest"),
   enabled: autoUpdatesEnabled,
   status: autoUpdatesEnabled ? "idle" : "disabled",
 };

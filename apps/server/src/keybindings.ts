@@ -39,7 +39,7 @@ import {
   SchemaIssue,
   SchemaTransformation,
   Ref,
-  ServiceMap,
+  Context,
   Scope,
   Stream,
 } from "effect";
@@ -61,12 +61,16 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+n", command: "terminal.new", when: "terminalFocus" },
   { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
   { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
+  { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
   { key: "mod+o", command: "editor.openFavorite" },
   { key: "mod+shift+[", command: "thread.previous" },
   { key: "mod+shift+]", command: "thread.next" },
+  { key: "mod+k", command: "palette.open", when: "!terminalFocus" },
+  { key: "mod+shift+p", command: "agent.pause" },
+  { key: "mod+shift+s", command: "agent.stop" },
   ...THREAD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
     key: `mod+${index + 1}`,
     command,
@@ -322,7 +326,7 @@ export const ResolvedKeybindingFromConfig = KeybindingRule.pipe(
             Predicate.isNotNull,
             () =>
               new SchemaIssue.InvalidValue(Option.some(rule), {
-                title: "Invalid keybinding rule",
+                message: "Invalid keybinding rule",
               }),
           ),
           Effect.map((resolved) => resolved),
@@ -334,7 +338,7 @@ export const ResolvedKeybindingFromConfig = KeybindingRule.pipe(
           if (!key) {
             return yield* Effect.fail(
               new SchemaIssue.InvalidValue(Option.some(resolved), {
-                title: "Resolved shortcut cannot be encoded to key string",
+                message: "Resolved shortcut cannot be encoded to key string",
               }),
             );
           }
@@ -521,7 +525,7 @@ export interface KeybindingsShape {
 /**
  * Keybindings - Service tag for keybinding configuration operations.
  */
-export class Keybindings extends ServiceMap.Service<Keybindings, KeybindingsShape>()(
+export class Keybindings extends Context.Service<Keybindings, KeybindingsShape>()(
   "t3/keybindings",
 ) {}
 
@@ -718,17 +722,31 @@ const makeKeybindings = Effect.gen(function* () {
 
       const runtimeConfig = yield* loadRuntimeCustomKeybindingsConfig();
       if (runtimeConfig.issues.length > 0) {
-        yield* Effect.logWarning(
-          "skipping startup keybindings default sync because config has issues",
-          {
-            path: keybindingsConfigPath,
-            issues: runtimeConfig.issues,
-          },
+        const hasOnlyInvalidEntries = runtimeConfig.issues.every(
+          (issue) => issue.kind === "keybindings.invalid-entry",
         );
-        yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
-        return;
+
+        if (!hasOnlyInvalidEntries) {
+          yield* Effect.logWarning(
+            "skipping startup keybindings default sync because config has issues",
+            {
+              path: keybindingsConfigPath,
+              issues: runtimeConfig.issues,
+            },
+          );
+          yield* Cache.invalidate(resolvedConfigCache, resolvedConfigCacheKey);
+          return;
+        }
+
+        yield* Effect.logWarning("sanitizing invalid keybinding entries on startup", {
+          path: keybindingsConfigPath,
+          issues: runtimeConfig.issues,
+        });
       }
-      const customConfig = runtimeConfig.keybindings;
+      const customConfig =
+        runtimeConfig.issues.length > 0
+          ? yield* loadWritableCustomKeybindingsConfig()
+          : runtimeConfig.keybindings;
       const existingCommands = new Set(customConfig.map((entry) => entry.command));
       const missingDefaults: KeybindingRule[] = [];
       const shortcutConflictWarnings: Array<{

@@ -1,7 +1,11 @@
 import type {
+  ModelCapabilities,
   ServerProvider,
   ServerProviderAuth,
+  ServerProviderSkill,
+  ServerProviderSlashCommand,
   ServerProviderModel,
+  ServerProviderRuntimeSupport,
   ServerProviderState,
 } from "@t3tools/contracts";
 import { Effect, Stream } from "effect";
@@ -25,14 +29,47 @@ export interface ProviderProbeResult {
   readonly message?: string;
 }
 
+const STABLE_NATIVE_RUNTIME_SUPPORT: Partial<
+  Record<ServerProvider["provider"], ServerProviderRuntimeSupport>
+> = {
+  codex: {
+    transport: "native-cli",
+    runtime: "stable",
+    sessionStart: "stable",
+    sendTurn: "stable",
+    resumeSession: "stable",
+    rollbackThread: "stable",
+    sessionModelSwitch: "in-session",
+  },
+  claudeAgent: {
+    transport: "native-cli",
+    runtime: "stable",
+    sessionStart: "stable",
+    sendTurn: "stable",
+    resumeSession: "stable",
+    rollbackThread: "stable",
+    sessionModelSwitch: "in-session",
+  },
+};
+
+const EXPERIMENTAL_ACP_RUNTIME_SUPPORT: ServerProviderRuntimeSupport = {
+  transport: "acp",
+  runtime: "experimental",
+  sessionStart: "unavailable",
+  sendTurn: "unavailable",
+  resumeSession: "unavailable",
+  rollbackThread: "unavailable",
+  sessionModelSwitch: "unsupported",
+  notes: "ACP provider metadata is wired up, but Beppo runtime transport has not landed yet.",
+};
+
 export function nonEmptyTrimmed(value: string | undefined): string | undefined {
   if (!value) return undefined;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-export function isCommandMissingCause(error: unknown, commandName: string): boolean {
-  if (!(error instanceof Error)) return false;
+export function isCommandMissingCause(error: Error, commandName: string): boolean {
   const lower = error.message.toLowerCase();
   const name = commandName.toLowerCase();
   return (
@@ -107,6 +144,7 @@ export function providerModelsFromSettings(
   builtInModels: ReadonlyArray<ServerProviderModel>,
   provider: ServerProvider["provider"],
   customModels: ReadonlyArray<string>,
+  customModelCapabilities: ModelCapabilities,
 ): ReadonlyArray<ServerProviderModel> {
   const resolvedBuiltInModels = [...builtInModels];
   const seen = new Set(resolvedBuiltInModels.map((model) => model.slug));
@@ -122,7 +160,7 @@ export function providerModelsFromSettings(
       slug: normalized,
       name: normalized,
       isCustom: true,
-      capabilities: null,
+      capabilities: customModelCapabilities,
     });
   }
 
@@ -134,7 +172,12 @@ export function buildServerProvider(input: {
   enabled: boolean;
   checkedAt: string;
   models: ReadonlyArray<ServerProviderModel>;
+  slashCommands?: ReadonlyArray<ServerProviderSlashCommand>;
+  skills?: ReadonlyArray<ServerProviderSkill>;
   probe: ProviderProbeResult;
+  experimental?: boolean;
+  runtimeSupport?: ServerProviderRuntimeSupport;
+  rateLimits?: unknown;
 }): ServerProvider {
   return {
     provider: input.provider,
@@ -145,8 +188,40 @@ export function buildServerProvider(input: {
     auth: input.probe.auth,
     checkedAt: input.checkedAt,
     ...(input.probe.message ? { message: input.probe.message } : {}),
+    ...(input.experimental ? { experimental: true } : {}),
+    ...((input.runtimeSupport ?? STABLE_NATIVE_RUNTIME_SUPPORT[input.provider]) !== undefined
+      ? { runtimeSupport: input.runtimeSupport ?? STABLE_NATIVE_RUNTIME_SUPPORT[input.provider] }
+      : {}),
+    ...(input.rateLimits !== undefined ? { rateLimits: input.rateLimits } : {}),
     models: input.models,
+    slashCommands: [...(input.slashCommands ?? [])],
+    skills: [...(input.skills ?? [])],
   };
+}
+
+export function buildExperimentalAcpServerProvider(input: {
+  provider: Extract<ServerProvider["provider"], "githubCopilot" | "cursor">;
+  enabled: boolean;
+  checkedAt: string;
+  models: ReadonlyArray<ServerProviderModel>;
+}): ServerProvider {
+  return buildServerProvider({
+    provider: input.provider,
+    enabled: input.enabled,
+    checkedAt: input.checkedAt,
+    models: input.models,
+    experimental: true,
+    runtimeSupport: EXPERIMENTAL_ACP_RUNTIME_SUPPORT,
+    probe: {
+      installed: false,
+      version: null,
+      status: "warning",
+      auth: { status: "unknown" },
+      message: input.enabled
+        ? "Experimental ACP provider is enabled in settings, but session transport is not available yet."
+        : "Experimental ACP provider scaffolding is available, but runtime transport is not enabled yet.",
+    },
+  });
 }
 
 export const collectStreamAsString = <E>(

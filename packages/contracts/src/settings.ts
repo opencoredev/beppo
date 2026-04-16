@@ -7,7 +7,7 @@ import {
   CodexModelOptions,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
 } from "./model";
-import { ModelSelection } from "./orchestration";
+import { TextGenerationModelSelection } from "./orchestration";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -24,16 +24,24 @@ export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type;
 export const DEFAULT_SIDEBAR_THREAD_SORT_ORDER: SidebarThreadSortOrder = "updated_at";
 
 export const ClientSettingsSchema = Schema.Struct({
-  confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
-  confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
-  diffWordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  diffWordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  showSidebarProviders: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  showSidebarUpdatePill: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  sidebarProviderVisibility: Schema.Struct({
+    codex: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+    claudeAgent: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  }).pipe(Schema.withDecodingDefault(Effect.succeed({ codex: true, claudeAgent: true }))),
   sidebarProjectSortOrder: SidebarProjectSortOrder.pipe(
-    Schema.withDecodingDefault(() => DEFAULT_SIDEBAR_PROJECT_SORT_ORDER),
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_SORT_ORDER)),
   ),
   sidebarThreadSortOrder: SidebarThreadSortOrder.pipe(
-    Schema.withDecodingDefault(() => DEFAULT_SIDEBAR_THREAD_SORT_ORDER),
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_THREAD_SORT_ORDER)),
   ),
-  timestampFormat: TimestampFormat.pipe(Schema.withDecodingDefault(() => DEFAULT_TIMESTAMP_FORMAT)),
+  timestampFormat: TimestampFormat.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_TIMESTAMP_FORMAT)),
+  ),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 
@@ -53,41 +61,80 @@ const makeBinaryPathSetting = (fallback: string) =>
         encode: (value) => Effect.succeed(value),
       }),
     ),
-    Schema.withDecodingDefault(() => fallback),
+    Schema.withDecodingDefault(Effect.succeed(fallback)),
   );
 
 export const CodexSettings = Schema.Struct({
-  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   binaryPath: makeBinaryPathSetting("codex"),
-  homePath: TrimmedString.pipe(Schema.withDecodingDefault(() => "")),
-  customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(() => [])),
+  homePath: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
 });
 export type CodexSettings = typeof CodexSettings.Type;
 
 export const ClaudeSettings = Schema.Struct({
-  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   binaryPath: makeBinaryPathSetting("claude"),
-  customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(() => [])),
+  customModels: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
 });
 export type ClaudeSettings = typeof ClaudeSettings.Type;
 
-export const ServerSettings = Schema.Struct({
-  enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
-  defaultThreadEnvMode: ThreadEnvMode.pipe(
-    Schema.withDecodingDefault(() => "local" as const satisfies ThreadEnvMode),
+export const OpenAICompatibleWireApi = Schema.Literals(["chat-completions"]);
+export type OpenAICompatibleWireApi = typeof OpenAICompatibleWireApi.Type;
+
+export const OpenAICompatibleEndpointSettings = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  label: TrimmedNonEmptyString,
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  baseUrl: TrimmedNonEmptyString,
+  apiKey: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  apiKeyEnvVar: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  model: TrimmedNonEmptyString.pipe(
+    Schema.withDecodingDefault(
+      Effect.succeed(DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.openaiCompatible),
+    ),
   ),
-  textGenerationModelSelection: ModelSelection.pipe(
-    Schema.withDecodingDefault(() => ({
-      provider: "codex" as const,
-      model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
-    })),
+  wireApi: OpenAICompatibleWireApi.pipe(
+    Schema.withDecodingDefault(Effect.succeed("chat-completions" as const)),
+  ),
+});
+export type OpenAICompatibleEndpointSettings = typeof OpenAICompatibleEndpointSettings.Type;
+
+export const OpenAICompatibleSettings = Schema.Struct({
+  endpoints: Schema.Array(OpenAICompatibleEndpointSettings).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+});
+export type OpenAICompatibleSettings = typeof OpenAICompatibleSettings.Type;
+
+export const ObservabilitySettings = Schema.Struct({
+  otlpTracesUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  otlpMetricsUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+});
+export type ObservabilitySettings = typeof ObservabilitySettings.Type;
+
+export const ServerSettings = Schema.Struct({
+  enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  defaultThreadEnvMode: ThreadEnvMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed("local" as const satisfies ThreadEnvMode)),
+  ),
+  addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  textGenerationModelSelection: TextGenerationModelSelection.pipe(
+    Schema.withDecodingDefault(
+      Effect.succeed({
+        provider: "codex" as const,
+        model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
+      }),
+    ),
   ),
 
   // Provider specific settings
   providers: Schema.Struct({
-    codex: CodexSettings.pipe(Schema.withDecodingDefault(() => ({}))),
-    claudeAgent: ClaudeSettings.pipe(Schema.withDecodingDefault(() => ({}))),
-  }).pipe(Schema.withDecodingDefault(() => ({}))),
+    codex: CodexSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+    claudeAgent: ClaudeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+    openaiCompatible: OpenAICompatibleSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -139,6 +186,11 @@ const ModelSelectionPatch = Schema.Union([
     model: Schema.optionalKey(TrimmedNonEmptyString),
     options: Schema.optionalKey(ClaudeModelOptionsPatch),
   }),
+  Schema.Struct({
+    provider: Schema.optionalKey(Schema.Literal("openaiCompatible")),
+    endpointId: Schema.optionalKey(TrimmedNonEmptyString),
+    model: Schema.optionalKey(TrimmedNonEmptyString),
+  }),
 ]);
 
 const CodexSettingsPatch = Schema.Struct({
@@ -154,14 +206,26 @@ const ClaudeSettingsPatch = Schema.Struct({
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
+const OpenAICompatibleSettingsPatch = Schema.Struct({
+  endpoints: Schema.optionalKey(Schema.Array(OpenAICompatibleEndpointSettings)),
+});
+
 export const ServerSettingsPatch = Schema.Struct({
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
+  addProjectBaseDirectory: Schema.optionalKey(Schema.String),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
+  observability: Schema.optionalKey(
+    Schema.Struct({
+      otlpTracesUrl: Schema.optionalKey(Schema.String),
+      otlpMetricsUrl: Schema.optionalKey(Schema.String),
+    }),
+  ),
   providers: Schema.optionalKey(
     Schema.Struct({
       codex: Schema.optionalKey(CodexSettingsPatch),
       claudeAgent: Schema.optionalKey(ClaudeSettingsPatch),
+      openaiCompatible: Schema.optionalKey(OpenAICompatibleSettingsPatch),
     }),
   ),
 });

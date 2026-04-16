@@ -1,6 +1,6 @@
 {
   "name": "t3",
-  "version": "0.0.18",
+  "version": "0.0.17",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -18,11 +18,12 @@
     "dev": "bun run src/bin.ts",
     "build": "bun scripts/cli.ts build",
     "start": "node dist/bin.mjs",
-    "prepare": "effect-language-service patch",
+    "prepare": "node ../../scripts/effect-prepare.mjs",
     "typecheck": "tsc --noEmit",
     "test": "bunx --bun vitest run"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^0.19.0",
     "@anthropic-ai/claude-agent-sdk": "^0.2.77",
     "@effect/platform-bun": "catalog:",
     "@effect/platform-node": "catalog:",
@@ -30,7 +31,8 @@
     "@pierre/diffs": "^1.1.0-beta.16",
     "effect": "catalog:",
     "node-pty": "^1.1.0",
-    "open": "^10.1.0"
+    "open": "^10.1.0",
+    "openai": "^6.34.0"
   },
   "devDependencies": {
     "@effect/language-service": "catalog:",

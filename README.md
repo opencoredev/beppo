@@ -12,6 +12,32 @@
 
 Beppo is an early-stage interface for running coding agents with a UI that stays responsive, predictable, and robust under real session load. The current stack centers on Codex App Server, with the browser UI and desktop shell both built from the same monorepo.
 
+## Feature Highlights
+
+- Chat-first thread management with faster project and session navigation
+- Multi-provider model picking with first-class provider identity across the UI
+- Pinned threads for quickly resurfacing important sessions
+- Global command palette for fast navigation, theme switching, and agent controls
+- Plan sidebar with copy, download, and save-to-workspace actions
+- Pull request checkout flow for turning a PR into a local or worktree-backed thread
+- Thread terminal drawer with split terminals and multi-terminal management
+- Smart notifications for completions, errors, and input-needed moments
+- Context window and rate-limit visibility while an agent is running
+- Smoother day-to-day developer UX around sidebar, threads, and session controls
+
+## Inspiration
+
+Some of Beppo's session-management and sidebar polish was inspired by [dpcode](https://github.com/Emanuele-web04/dpcode), especially the ideas around:
+
+- pinned threads
+- provider logos and identity cues
+- command palette driven navigation
+- notification ergonomics
+- plan-centric side surfaces
+- richer session chrome around agent workflows
+
+These features were not copied 1:1 on purpose. Beppo adapts them to fit its own architecture, existing terminal and diff flows, and its own product direction.
+
 ## Current Status
 
 - Very early work in progress
@@ -52,9 +78,10 @@ bun dev:desktop
 
 ## Quality Checks
 
-Before considering work complete in this repo, both of these must pass:
+Before considering work complete in this repo, all of these must pass:
 
 ```bash
+bun fmt
 bun lint
 bun typecheck
 ```
@@ -71,45 +98,17 @@ If you just want to use Beppo instead of developing it, install the desktop app 
 
 [Download Beppo Desktop](https://github.com/opencoredev/beppo/releases)
 
-### macOS release note
+Observability guide: [docs/observability.md](./docs/observability.md)
 
-The latest desktop release is live, but macOS builds are currently shipped without Apple signing/notarization. That means some Mac users will see Apple's "could not verify" warning when opening Beppo for the first time.
+## If you REALLY want to contribute still.... read this first
 
-This does not mean the app is known-malicious. It means the current release pipeline does not yet have the Apple Developer signing credentials needed for the normal Gatekeeper approval path.
-
-Current state:
-
-- Linux and desktop asset-path packaging issues have been fixed in the latest release
-- The latest public desktop release is `v0.0.13`
-- macOS still requires a manual first-run workaround until Apple signing and notarization are configured
-
-macOS workaround:
-
-1. Drag `Beppo.app` into `Applications`
-2. In Finder, `Control-click` `Beppo.app`
-3. Choose `Open`
-4. In the warning dialog, click `Open`
-
-If macOS still blocks it:
-
-1. Open `System Settings`
-2. Go to `Privacy & Security`
-3. Find the Beppo security warning near the bottom
-4. Click `Open Anyway`
-
-Terminal fallback:
+Before local development, prepare the environment and install dependencies:
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/Beppo.app
-open /Applications/Beppo.app
+# Optional: only needed if you use mise for dev tool management.
+mise install
+bun install .
 ```
-
-Long term fix:
-
-- Proper Mac distribution requires Apple code signing and notarization
-- Until those credentials are configured in GitHub Actions, macOS releases will continue to need the manual first-run workaround
-
-## Contributing
 
 Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening an issue or PR.
 

@@ -2,15 +2,26 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
+    "jsx": "react-jsx",
     "types": ["node", "bun"],
-    "lib": ["ES2023", "esnext.disposable"],
+    "lib": ["ES2023", "DOM", "esnext.disposable"],
     "noEmit": true,
+    "baseUrl": "..",
     "allowImportingTsExtensions": true,
+    "paths": {
+      "~/*": ["apps/web/src/*"]
+    },
     "plugins": [
       {
         "name": "@effect/language-service"
       }
     ]
   },
-  "include": ["**/*.ts"]
+  "include": ["**/*.ts", "../apps/web/src/**/*.ts", "../apps/web/src/**/*.tsx"],
+  "exclude": [
+    "../apps/web/src/**/*.test.ts",
+    "../apps/web/src/**/*.test.tsx",
+    "../apps/web/src/**/*.browser.tsx",
+    "../apps/web/test"
+  ]
 }

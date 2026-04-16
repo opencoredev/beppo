@@ -1,6 +1,9 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
+import { ExecutionEnvironmentDescriptor } from "./environment";
+import { ServerAuthDescriptor } from "./auth";
 import {
   IsoDateTime,
+  PositiveInt,
   NonNegativeInt,
   ProjectId,
   ThreadId,
@@ -56,6 +59,51 @@ export const ServerProviderModel = Schema.Struct({
 });
 export type ServerProviderModel = typeof ServerProviderModel.Type;
 
+export const ServerProviderSlashCommandInput = Schema.Struct({
+  hint: TrimmedNonEmptyString,
+});
+export type ServerProviderSlashCommandInput = typeof ServerProviderSlashCommandInput.Type;
+
+export const ServerProviderSlashCommand = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  description: Schema.optional(TrimmedNonEmptyString),
+  input: Schema.optional(ServerProviderSlashCommandInput),
+});
+export type ServerProviderSlashCommand = typeof ServerProviderSlashCommand.Type;
+
+export const ServerProviderSkill = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  description: Schema.optional(TrimmedNonEmptyString),
+  path: TrimmedNonEmptyString,
+  scope: Schema.optional(TrimmedNonEmptyString),
+  enabled: Schema.Boolean,
+  displayName: Schema.optional(TrimmedNonEmptyString),
+  shortDescription: Schema.optional(TrimmedNonEmptyString),
+});
+export type ServerProviderSkill = typeof ServerProviderSkill.Type;
+
+export const ServerProviderSupportLevel = Schema.Literals([
+  "stable",
+  "experimental",
+  "unavailable",
+]);
+export type ServerProviderSupportLevel = typeof ServerProviderSupportLevel.Type;
+
+export const ServerProviderRuntimeTransport = Schema.Literals(["native-cli", "acp", "unavailable"]);
+export type ServerProviderRuntimeTransport = typeof ServerProviderRuntimeTransport.Type;
+
+export const ServerProviderRuntimeSupport = Schema.Struct({
+  transport: ServerProviderRuntimeTransport,
+  runtime: ServerProviderSupportLevel,
+  sessionStart: ServerProviderSupportLevel,
+  sendTurn: ServerProviderSupportLevel,
+  resumeSession: ServerProviderSupportLevel,
+  rollbackThread: ServerProviderSupportLevel,
+  sessionModelSwitch: Schema.Literals(["in-session", "restart-session", "unsupported"]),
+  notes: Schema.optional(TrimmedNonEmptyString),
+});
+export type ServerProviderRuntimeSupport = typeof ServerProviderRuntimeSupport.Type;
+
 export const ServerProvider = Schema.Struct({
   provider: ProviderKind,
   enabled: Schema.Boolean,
@@ -65,20 +113,40 @@ export const ServerProvider = Schema.Struct({
   auth: ServerProviderAuth,
   checkedAt: IsoDateTime,
   message: Schema.optional(TrimmedNonEmptyString),
+  experimental: Schema.optional(Schema.Boolean),
+  runtimeSupport: Schema.optional(ServerProviderRuntimeSupport),
+  rateLimits: Schema.optional(Schema.Unknown),
   models: Schema.Array(ServerProviderModel),
+  slashCommands: Schema.Array(ServerProviderSlashCommand).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  skills: Schema.Array(ServerProviderSkill).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
 });
 export type ServerProvider = typeof ServerProvider.Type;
 
 export const ServerProviders = Schema.Array(ServerProvider);
 export type ServerProviders = typeof ServerProviders.Type;
 
+export const ServerObservability = Schema.Struct({
+  logsDirectoryPath: TrimmedNonEmptyString,
+  localTracingEnabled: Schema.Boolean,
+  otlpTracesUrl: Schema.optional(TrimmedNonEmptyString),
+  otlpTracesEnabled: Schema.Boolean,
+  otlpMetricsUrl: Schema.optional(TrimmedNonEmptyString),
+  otlpMetricsEnabled: Schema.Boolean,
+});
+export type ServerObservability = typeof ServerObservability.Type;
+
 export const ServerConfig = Schema.Struct({
+  environment: ExecutionEnvironmentDescriptor,
+  auth: ServerAuthDescriptor,
   cwd: TrimmedNonEmptyString,
   keybindingsConfigPath: TrimmedNonEmptyString,
   keybindings: ResolvedKeybindingsConfig,
   issues: ServerConfigIssues,
   providers: ServerProviders,
   availableEditors: Schema.Array(EditorId),
+  observability: ServerObservability,
   settings: ServerSettings,
 });
 export type ServerConfig = typeof ServerConfig.Type;
@@ -156,10 +224,12 @@ export type ServerConfigStreamEvent = typeof ServerConfigStreamEvent.Type;
 
 export const ServerLifecycleReadyPayload = Schema.Struct({
   at: IsoDateTime,
+  environment: ExecutionEnvironmentDescriptor,
 });
 export type ServerLifecycleReadyPayload = typeof ServerLifecycleReadyPayload.Type;
 
 export const ServerLifecycleWelcomePayload = Schema.Struct({
+  environment: ExecutionEnvironmentDescriptor,
   cwd: TrimmedNonEmptyString,
   projectName: TrimmedNonEmptyString,
   bootstrapProjectId: Schema.optional(ProjectId),
@@ -193,3 +263,31 @@ export const ServerProviderUpdatedPayload = Schema.Struct({
   providers: ServerProviders,
 });
 export type ServerProviderUpdatedPayload = typeof ServerProviderUpdatedPayload.Type;
+
+export const ServerVoiceTranscriptionInput = Schema.Struct({
+  provider: ProviderKind,
+  cwd: TrimmedNonEmptyString,
+  threadId: Schema.optional(ThreadId),
+  audioBase64: TrimmedNonEmptyString,
+  mimeType: TrimmedNonEmptyString,
+  sampleRateHz: PositiveInt,
+  durationMs: PositiveInt,
+});
+export type ServerVoiceTranscriptionInput = typeof ServerVoiceTranscriptionInput.Type;
+
+export const ServerVoiceTranscriptionResult = Schema.Struct({
+  text: TrimmedNonEmptyString,
+});
+export type ServerVoiceTranscriptionResult = typeof ServerVoiceTranscriptionResult.Type;
+
+export class ServerVoiceTranscriptionError extends Schema.TaggedErrorClass<ServerVoiceTranscriptionError>()(
+  "ServerVoiceTranscriptionError",
+  {
+    detail: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}

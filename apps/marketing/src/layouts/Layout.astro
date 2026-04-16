@@ -1,12 +1,14 @@
 ---
+import { DISCORD_URL, RELEASES_URL, REPO_URL } from "../lib/releases";
+
 interface Props {
   title?: string;
   description?: string;
 }
 
 const {
-  title = "T3 Code",
-  description = "T3 Code — The best way to code with AI.",
+  title = "Beppo",
+  description = "Beppo is a desktop-first workspace for long-running coding agents, built for predictable sessions and calmer control.",
 } = Astro.props;
 ---
 
@@ -15,11 +17,16 @@ const {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content={description} />
+    <meta name="theme-color" content="#0b1017" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap"
       rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist@5/index.min.css"
     />
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" type="image/png" href="/favicon-32x32.png" sizes="32x32" />
@@ -28,31 +35,58 @@ const {
     <title>{title}</title>
   </head>
   <body>
-    <div class="page">
-      <nav class="nav">
-        <a href="/" class="nav-brand">
-          <img src="/icon.png" alt="T3" class="nav-icon" />
-        </a>
-        <a
-          href="https://github.com/pingdotgg/t3code"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="nav-github"
-        >
-          GitHub
-          <span class="nav-github-arrow" aria-hidden="true">&#8599;</span>
-        </a>
-      </nav>
+    <div class="page-shell">
+      <div class="ambient ambient-a" aria-hidden="true"></div>
+      <div class="ambient ambient-b" aria-hidden="true"></div>
+
+      <header class="site-header">
+        <nav class="site-nav">
+          <a href="/" class="brand-mark" aria-label="Beppo home">
+            <img src="/icon.jpg" alt="" class="brand-icon" width="30" height="30" />
+            <span>Beppo</span>
+          </a>
+
+          <div class="nav-links">
+            <a href="/" class="nav-link">Home</a>
+            <a href="/download" class="nav-link">Download</a>
+            <a href={DISCORD_URL} class="nav-link" target="_blank" rel="noopener noreferrer">
+              Discord
+            </a>
+            <a href={REPO_URL} class="nav-link" target="_blank" rel="noopener noreferrer">
+              GitHub
+            </a>
+            <a
+              href={RELEASES_URL}
+              class="nav-cta"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Latest release
+            </a>
+          </div>
+        </nav>
+      </header>
 
       <main class="main">
         <slot />
       </main>
 
-      <footer class="footer">
-        <span class="footer-copy">&copy; {new Date().getFullYear()} T3 Tools Inc</span>
+      <footer class="site-footer">
+        <div class="footer-copy">
+          <p class="footer-title">Beppo is an open workspace for coding agents.</p>
+          <p class="footer-note">
+            Inspired by thoughtful tools like
+            <a href="https://github.com/Emanuele-web04/dpcode" target="_blank" rel="noopener noreferrer">DP Code</a>
+            and
+            <a href="https://github.com/steipete/codexbar" target="_blank" rel="noopener noreferrer">CodexBar</a>,
+            while keeping its own product voice and architecture.
+          </p>
+        </div>
+
         <div class="footer-links">
-          <a href="https://github.com/pingdotgg/t3code" target="_blank" rel="noopener noreferrer">GitHub</a>
-          <a href="https://discord.gg/jn4EGJjrvv" target="_blank" rel="noopener noreferrer">Discord</a>
+          <a href={REPO_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer">Releases</a>
+          <a href={DISCORD_URL} target="_blank" rel="noopener noreferrer">Discord</a>
         </div>
       </footer>
     </div>
@@ -61,11 +95,28 @@ const {
 
 <style is:global>
   :root {
-    --bg: #09090b;
-    --fg: #fafafa;
-    --fg-muted: #a1a1aa;
-    --fg-dim: #71717a;
-    --border: rgba(255, 255, 255, 0.08);
+    --bg: #081018;
+    --bg-deep: #050a10;
+    --surface: rgba(16, 24, 36, 0.78);
+    --surface-strong: rgba(20, 30, 44, 0.9);
+    --panel: rgba(12, 19, 29, 0.74);
+    --panel-strong: rgba(17, 26, 38, 0.92);
+    --fg: #f5f7fb;
+    --fg-soft: #d0d9e8;
+    --fg-muted: #9aa8bb;
+    --fg-dim: #718197;
+    --line: rgba(207, 224, 255, 0.12);
+    --line-strong: rgba(207, 224, 255, 0.2);
+    --accent: #8dd8ff;
+    --accent-strong: #53b5ff;
+    --accent-warm: #ffb870;
+    --success: #80f7be;
+    --shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+    --radius-xl: 28px;
+    --radius-lg: 20px;
+    --radius-md: 14px;
+    --font-sans: "Geist Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --font-brand: "Space Grotesk", "Geist Variable", ui-sans-serif, sans-serif;
   }
 
   * {
@@ -76,28 +127,33 @@ const {
 
   html {
     color-scheme: dark;
+    -webkit-text-size-adjust: 100%;
   }
 
   body {
-    background: var(--bg);
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at top left, rgba(83, 181, 255, 0.15), transparent 35%),
+      radial-gradient(circle at 85% 10%, rgba(255, 184, 112, 0.12), transparent 28%),
+      linear-gradient(180deg, #09111a 0%, #05090f 50%, #04070c 100%);
     color: var(--fg);
-    font-family: "DM Sans", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    min-height: 100vh;
     overflow-x: hidden;
   }
 
-  body::after {
+  body::before {
     content: "";
     position: fixed;
     inset: 0;
     pointer-events: none;
-    opacity: 0.035;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-    background-repeat: repeat;
-    background-size: 256px 256px;
-    z-index: 9999;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+    background-size: 28px 28px;
+    mask-image: radial-gradient(circle at center, black 40%, transparent 90%);
+    opacity: 0.35;
   }
 
   a {
@@ -108,121 +164,244 @@ const {
   img {
     display: block;
     max-width: 100%;
+    height: auto;
   }
 
-  @keyframes fade-in {
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
+  @keyframes rise-in {
     from {
       opacity: 0;
-      transform: translateY(8px);
+      transform: translateY(14px);
     }
+
     to {
       opacity: 1;
       transform: translateY(0);
     }
   }
+
+  @keyframes soft-pulse {
+    0%,
+    100% {
+      opacity: 0.7;
+      transform: scale(1);
+    }
+
+    50% {
+      opacity: 1;
+      transform: scale(1.02);
+    }
+  }
 </style>
 
 <style>
-  /* ── Page ── */
-
-  .page {
+  .page-shell {
+    position: relative;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
-    overflow-x: hidden;
+    isolation: isolate;
   }
 
-  /* ── Navbar ── */
+  .ambient {
+    position: fixed;
+    inset: auto;
+    pointer-events: none;
+    filter: blur(60px);
+    opacity: 0.35;
+    z-index: -1;
+  }
 
-  .nav {
+  .ambient-a {
+    top: 4rem;
+    left: -8rem;
+    width: 24rem;
+    height: 24rem;
+    background: rgba(83, 181, 255, 0.22);
+    animation: soft-pulse 10s ease-in-out infinite;
+  }
+
+  .ambient-b {
+    right: -6rem;
+    bottom: 8rem;
+    width: 20rem;
+    height: 20rem;
+    background: rgba(255, 184, 112, 0.14);
+    animation: soft-pulse 12s ease-in-out infinite;
+  }
+
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    backdrop-filter: blur(18px) saturate(1.3);
+    -webkit-backdrop-filter: blur(18px) saturate(1.3);
+    background: rgba(6, 11, 18, 0.68);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .site-nav {
+    width: min(1180px, calc(100vw - 32px));
+    margin: 0 auto;
+    padding: 0.95rem 0;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 1.5rem 2.5rem;
-    opacity: 0.5;
-    transition: opacity 0.4s ease;
+    gap: 1rem;
   }
 
-  .nav:hover {
-    opacity: 1;
+  .brand-mark {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-family: var(--font-brand);
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
   }
 
-  .nav-brand {
+  .brand-icon {
+    border-radius: 9px;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+  }
+
+  .nav-links {
     display: flex;
     align-items: center;
+    gap: 0.9rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
-  .nav-icon {
-    width: 28px;
-    height: 28px;
-    border-radius: 6px;
-  }
-
-  .nav-github {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
+  .nav-link {
     color: var(--fg-muted);
-    font-size: 0.875rem;
-    transition: color 0.3s ease;
+    font-size: 0.9rem;
+    transition: color 0.16s ease;
   }
 
-  .nav-github:hover {
+  .nav-link:hover {
     color: var(--fg);
   }
 
-  .nav-github-arrow {
-    display: inline-block;
-    transition: transform 0.3s ease;
+  .nav-cta {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.5rem;
+    padding: 0.6rem 1rem;
+    border-radius: 999px;
+    background: linear-gradient(135deg, rgba(141, 216, 255, 0.22), rgba(255, 184, 112, 0.18));
+    border: 1px solid var(--line-strong);
+    color: var(--fg);
+    font-size: 0.88rem;
+    font-weight: 600;
+    transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
   }
 
-  .nav-github:hover .nav-github-arrow {
-    transform: translateX(2px) translateY(-1px);
+  .nav-cta:hover {
+    transform: translateY(-1px);
+    border-color: rgba(141, 216, 255, 0.35);
+    background: linear-gradient(135deg, rgba(141, 216, 255, 0.28), rgba(255, 184, 112, 0.22));
   }
-
-  /* ── Main content ── */
 
   .main {
+    width: min(1180px, calc(100vw - 32px));
+    margin: 0 auto;
     flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
+    padding: 2.5rem 0 4rem;
   }
 
-  /* ── Footer ── */
-
-  .footer {
+  .site-footer {
+    width: min(1180px, calc(100vw - 32px));
+    margin: 0 auto;
+    padding: 1.5rem 0 2.5rem;
+    border-top: 1px solid var(--line);
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     justify-content: space-between;
-    padding: 1.5rem 2.5rem;
-    font-size: 0.8rem;
+    gap: 1.5rem;
+  }
+
+  .footer-copy {
+    max-width: 42rem;
+  }
+
+  .footer-title {
+    font-family: var(--font-brand);
+    font-size: 0.96rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    margin-bottom: 0.35rem;
+  }
+
+  .footer-note {
     color: var(--fg-dim);
+    font-size: 0.9rem;
+    line-height: 1.6;
+  }
+
+  .footer-note a,
+  .footer-links a {
+    color: var(--fg-soft);
   }
 
   .footer-links {
     display: flex;
-    gap: 1.25rem;
-  }
-
-  .footer-links a {
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
     color: var(--fg-dim);
-    transition: color 0.3s ease;
+    font-size: 0.9rem;
   }
 
-  .footer-links a:hover {
-    color: var(--fg);
-  }
-
-  /* ── Mobile ── */
-
-  @media (max-width: 640px) {
-    .nav {
-      padding: 1.25rem;
+  @media (max-width: 900px) {
+    .site-nav,
+    .main,
+    .site-footer {
+      width: min(100vw - 24px, 100%);
     }
 
-    .footer {
-      padding: 1.25rem;
+    .site-nav {
+      padding: 0.9rem 0;
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .nav-links {
+      justify-content: flex-start;
+    }
+
+    .site-footer {
+      flex-direction: column;
+      align-items: flex-start;
+      padding-bottom: 2rem;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .main {
+      padding-top: 1.5rem;
+    }
+
+    .nav-links {
+      gap: 0.75rem;
+    }
+
+    .nav-link,
+    .footer-note,
+    .footer-links {
+      font-size: 0.86rem;
     }
   }
 </style>
