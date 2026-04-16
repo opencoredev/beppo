@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import {
   deriveLatestProviderRateLimitSnapshots,
   deriveRateLimitEntriesFromPayload,
+  pickLatestProviderRateLimitSnapshot,
 } from "../lib/rateLimits";
 import { useStore } from "../store";
 import { readNativeApi } from "../nativeApi";
@@ -138,14 +139,16 @@ export function SidebarProviderStatusList(props: {
       <SidebarMenu className="gap-1">
         {props.providers.map((provider) => {
           const providerEntries = deriveRateLimitEntriesFromPayload(provider.rateLimits);
-          const snapshot =
+          const snapshot = pickLatestProviderRateLimitSnapshot([
             providerEntries.length > 0
               ? {
                   provider: provider.provider,
                   updatedAt: provider.checkedAt,
                   entries: providerEntries,
                 }
-              : snapshotsByProvider.get(provider.provider);
+              : null,
+            snapshotsByProvider.get(provider.provider),
+          ]);
           const headline = getProviderHeadline(provider);
           const HeadlineIcon = headline.icon;
           const version = formatVersion(provider.version);

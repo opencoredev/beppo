@@ -15,6 +15,7 @@ import {
   applyOrchestrationEvent,
   applyOrchestrationEvents,
   syncServerReadModel,
+  syncServerReadModelSummary,
   type AppState,
 } from "./store";
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
@@ -247,6 +248,93 @@ describe("store read model sync", () => {
     );
 
     expect(next.threads[0]?.archivedAt).toBe(archivedAt);
+  });
+
+  it("preserves sidebar badges when bootstrapping from a summary snapshot", () => {
+    const initialState: AppState = {
+      ...makeState(makeThread()),
+      bootstrapComplete: false,
+    };
+
+    const next = syncServerReadModelSummary(
+      initialState,
+      makeReadModel(
+        makeReadModelThread({
+          latestTurn: {
+            turnId: TurnId.makeUnsafe("turn-1"),
+            state: "running",
+            requestedAt: "2026-02-27T00:00:10.000Z",
+            startedAt: "2026-02-27T00:00:10.000Z",
+            completedAt: null,
+            assistantMessageId: null,
+          },
+          messages: [
+            {
+              id: MessageId.makeUnsafe("user-1"),
+              role: "user",
+              text: "Please continue",
+              turnId: TurnId.makeUnsafe("turn-1"),
+              streaming: false,
+              createdAt: "2026-02-27T00:00:11.000Z",
+              updatedAt: "2026-02-27T00:00:11.000Z",
+            },
+          ],
+          activities: [
+            {
+              id: EventId.makeUnsafe("activity-approval"),
+              tone: "approval",
+              kind: "approval.requested",
+              summary: "Need approval",
+              payload: {
+                requestId: "approval-1",
+                requestKind: "command",
+                detail: "run git status",
+              },
+              turnId: TurnId.makeUnsafe("turn-1"),
+              createdAt: "2026-02-27T00:00:12.000Z",
+            },
+            {
+              id: EventId.makeUnsafe("activity-user-input"),
+              tone: "info",
+              kind: "user-input.requested",
+              summary: "Need input",
+              payload: {
+                requestId: "input-1",
+                questions: [
+                  {
+                    id: "choice",
+                    header: "Choose",
+                    question: "Pick one",
+                    options: [{ label: "A", description: "Use A" }],
+                  },
+                ],
+              },
+              turnId: TurnId.makeUnsafe("turn-1"),
+              createdAt: "2026-02-27T00:00:13.000Z",
+            },
+          ],
+          proposedPlans: [
+            {
+              id: "plan-1",
+              turnId: TurnId.makeUnsafe("turn-1"),
+              planMarkdown: "Ship it",
+              implementedAt: null,
+              implementationThreadId: null,
+              createdAt: "2026-02-27T00:00:14.000Z",
+              updatedAt: "2026-02-27T00:00:14.000Z",
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(next.sidebarThreadsById["thread-1"]).toMatchObject({
+      latestUserMessageAt: "2026-02-27T00:00:11.000Z",
+      hasPendingApprovals: true,
+      hasPendingUserInput: true,
+      hasActionableProposedPlan: true,
+    });
+    expect(next.bootstrapComplete).toBe(true);
   });
 
   it("replaces projects using snapshot order during recovery", () => {

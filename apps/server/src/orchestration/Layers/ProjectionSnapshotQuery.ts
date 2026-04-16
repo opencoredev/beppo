@@ -274,6 +274,40 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
+  const listSummaryThreadMessageRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionThreadMessageDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          message_id AS "messageId",
+          thread_id AS "threadId",
+          turn_id AS "turnId",
+          role,
+          text,
+          attachments_json AS "attachments",
+          is_streaming AS "isStreaming",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM projection_thread_messages AS messages
+        WHERE role = 'user'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM projection_thread_messages AS newer_messages
+            WHERE newer_messages.thread_id = messages.thread_id
+              AND newer_messages.role = 'user'
+              AND (
+                newer_messages.created_at > messages.created_at
+                OR (
+                  newer_messages.created_at = messages.created_at
+                  AND newer_messages.message_id > messages.message_id
+                )
+              )
+          )
+        ORDER BY thread_id ASC, created_at ASC, message_id ASC
+      `,
+  });
+
   const listThreadProposedPlanRows = SqlSchema.findAll({
     Request: Schema.Void,
     Result: ProjectionThreadProposedPlanDbRowSchema,
@@ -293,6 +327,59 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
+  const listSummaryThreadProposedPlanRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionThreadProposedPlanDbRowSchema,
+    execute: () =>
+      sql`
+        WITH ranked_plans AS (
+          SELECT
+            plans.plan_id AS "planId",
+            plans.thread_id AS "threadId",
+            plans.turn_id AS "turnId",
+            plans.plan_markdown AS "planMarkdown",
+            plans.implemented_at AS "implementedAt",
+            plans.implementation_thread_id AS "implementationThreadId",
+            plans.created_at AS "createdAt",
+            plans.updated_at AS "updatedAt",
+            threads.latest_turn_id AS "latestTurnId",
+            ROW_NUMBER() OVER (
+              PARTITION BY plans.thread_id
+              ORDER BY plans.updated_at DESC, plans.plan_id DESC
+            ) AS overall_rank,
+            ROW_NUMBER() OVER (
+              PARTITION BY plans.thread_id, CASE
+                WHEN threads.latest_turn_id IS NOT NULL
+                  AND plans.turn_id = threads.latest_turn_id
+                THEN 1
+                ELSE 0
+              END
+              ORDER BY plans.updated_at DESC, plans.plan_id DESC
+            ) AS latest_turn_rank
+          FROM projection_thread_proposed_plans AS plans
+          INNER JOIN projection_threads AS threads
+            ON threads.thread_id = plans.thread_id
+        )
+        SELECT
+          "planId",
+          "threadId",
+          "turnId",
+          "planMarkdown",
+          "implementedAt",
+          "implementationThreadId",
+          "createdAt",
+          "updatedAt"
+        FROM ranked_plans
+        WHERE overall_rank = 1
+          OR (
+            "latestTurnId" IS NOT NULL
+            AND "turnId" = "latestTurnId"
+            AND latest_turn_rank = 1
+          )
+        ORDER BY "threadId" ASC, "updatedAt" ASC, "planId" ASC
+      `,
+  });
+
   const listThreadActivityRows = SqlSchema.findAll({
     Request: Schema.Void,
     Result: ProjectionThreadActivityDbRowSchema,
@@ -309,6 +396,39 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           sequence,
           created_at AS "createdAt"
         FROM projection_thread_activities
+        ORDER BY
+          thread_id ASC,
+          CASE WHEN sequence IS NULL THEN 0 ELSE 1 END ASC,
+          sequence ASC,
+          created_at ASC,
+          activity_id ASC
+      `,
+  });
+
+  const listSummaryThreadActivityRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionThreadActivityDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          activity_id AS "activityId",
+          thread_id AS "threadId",
+          turn_id AS "turnId",
+          tone,
+          kind,
+          summary,
+          payload_json AS "payload",
+          sequence,
+          created_at AS "createdAt"
+        FROM projection_thread_activities
+        WHERE kind IN (
+          'approval.requested',
+          'approval.resolved',
+          'provider.approval.respond.failed',
+          'user-input.requested',
+          'user-input.resolved',
+          'provider.user-input.respond.failed'
+        )
         ORDER BY
           thread_id ASC,
           CASE WHEN sequence IS NULL THEN 0 ELSE 1 END ASC,
@@ -680,7 +800,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                     ),
                   ),
                 )
-              : [];
+              : yield* listSummaryThreadMessageRows(undefined).pipe(
+                  Effect.mapError(
+                    toPersistenceSqlOrDecodeError(
+                      "ProjectionSnapshotQuery.getSnapshot:listSummaryThreadMessages:query",
+                      "ProjectionSnapshotQuery.getSnapshot:listSummaryThreadMessages:decodeRows",
+                    ),
+                  ),
+                );
           const proposedPlanRows =
             scope === "full"
               ? yield* listThreadProposedPlanRows(undefined).pipe(
@@ -691,7 +818,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                     ),
                   ),
                 )
-              : [];
+              : yield* listSummaryThreadProposedPlanRows(undefined).pipe(
+                  Effect.mapError(
+                    toPersistenceSqlOrDecodeError(
+                      "ProjectionSnapshotQuery.getSnapshot:listSummaryThreadProposedPlans:query",
+                      "ProjectionSnapshotQuery.getSnapshot:listSummaryThreadProposedPlans:decodeRows",
+                    ),
+                  ),
+                );
           const activityRows =
             scope === "full"
               ? yield* listThreadActivityRows(undefined).pipe(
@@ -702,7 +836,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                     ),
                   ),
                 )
-              : [];
+              : yield* listSummaryThreadActivityRows(undefined).pipe(
+                  Effect.mapError(
+                    toPersistenceSqlOrDecodeError(
+                      "ProjectionSnapshotQuery.getSnapshot:listSummaryThreadActivities:query",
+                      "ProjectionSnapshotQuery.getSnapshot:listSummaryThreadActivities:decodeRows",
+                    ),
+                  ),
+                );
           const checkpointRows =
             scope === "full"
               ? yield* listCheckpointRows(undefined).pipe(

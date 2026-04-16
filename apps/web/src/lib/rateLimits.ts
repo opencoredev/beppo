@@ -378,6 +378,23 @@ export function deriveLatestProviderRateLimitSnapshots(
   return snapshots;
 }
 
+export function pickLatestProviderRateLimitSnapshot(
+  snapshots: ReadonlyArray<ProviderRateLimitSnapshot | null | undefined>,
+): ProviderRateLimitSnapshot | null {
+  let latestSnapshot: ProviderRateLimitSnapshot | null = null;
+
+  for (const snapshot of snapshots) {
+    if (!snapshot) {
+      continue;
+    }
+    if (!latestSnapshot || snapshot.updatedAt > latestSnapshot.updatedAt) {
+      latestSnapshot = snapshot;
+    }
+  }
+
+  return latestSnapshot;
+}
+
 export function deriveVisibleRateLimitRows(
   entries: ReadonlyArray<RateLimitEntry>,
   options?: { readonly maxRows?: number },

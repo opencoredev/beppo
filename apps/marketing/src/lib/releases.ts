@@ -18,11 +18,7 @@ export interface Release {
   assets: ReleaseAsset[];
 }
 
-export type DownloadAssetTarget =
-  | "macos-arm64"
-  | "macos-x64"
-  | "windows-x64"
-  | "linux-x64";
+export type DownloadAssetTarget = "macos-arm64" | "macos-x64" | "windows-x64" | "linux-x64";
 
 const DOWNLOAD_ASSET_MATCHERS: Record<DownloadAssetTarget, (asset: ReleaseAsset) => boolean> = {
   "macos-arm64": (asset) => /stable-macos-arm64-.*\.dmg$/i.test(asset.name),

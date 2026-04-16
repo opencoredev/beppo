@@ -6,6 +6,7 @@ import {
   deriveLatestProviderRateLimitSnapshots,
   deriveVisibleRateLimitRows,
   formatRateLimitValue,
+  pickLatestProviderRateLimitSnapshot,
 } from "./rateLimits";
 
 function makeActivity(
@@ -186,5 +187,59 @@ describe("rateLimits helpers", () => {
         },
       ),
     ).toBe("80%");
+  });
+
+  it("prefers the freshest provider snapshot source", () => {
+    const providerSnapshot = {
+      provider: "codex" as const,
+      updatedAt: "2099-04-08T18:00:00.000Z",
+      entries:
+        deriveLatestActivityRateLimitSnapshot([
+          makeActivity("provider-activity", {
+            rateLimits: {
+              primary: {
+                usedPercent: 25,
+                windowDurationMins: 300,
+              },
+            },
+          }),
+        ])?.entries ?? [],
+    };
+    const newerThreadSnapshot = {
+      provider: "codex" as const,
+      updatedAt: "2099-04-08T19:00:00.000Z",
+      entries:
+        deriveLatestActivityRateLimitSnapshot([
+          makeActivity("thread-activity", {
+            rateLimits: {
+              primary: {
+                usedPercent: 10,
+                windowDurationMins: 300,
+              },
+            },
+          }),
+        ])?.entries ?? [],
+    };
+
+    expect(
+      formatRateLimitValue(
+        pickLatestProviderRateLimitSnapshot([providerSnapshot, newerThreadSnapshot])
+          ?.entries[0] ?? {
+          remaining: null,
+          limit: null,
+          remainingPercent: null,
+        },
+      ),
+    ).toBe("90%");
+    expect(
+      formatRateLimitValue(
+        pickLatestProviderRateLimitSnapshot([newerThreadSnapshot, providerSnapshot])
+          ?.entries[0] ?? {
+          remaining: null,
+          limit: null,
+          remainingPercent: null,
+        },
+      ),
+    ).toBe("90%");
   });
 });
