@@ -471,6 +471,20 @@ jobs:
             fi
           done
 
+      - name: Write release notes preamble
+        shell: bash
+        run: |
+          cat > release-notes-preamble.md <<'EOF'
+          > [!IMPORTANT]
+          > macOS builds may be unsigned when Apple Developer signing credentials are unavailable.
+          > If Finder blocks Beppo on first launch, try the standard right-click open flow first.
+          > If that still fails, run:
+          >
+          > ```bash
+          > xattr -dr com.apple.quarantine /Applications/Beppo.app
+          > ```
+          EOF
+
       - name: Publish release
         if: needs.preflight.outputs.previous_tag != ''
         uses: softprops/action-gh-release@v2
@@ -478,6 +492,7 @@ jobs:
           tag_name: ${{ needs.preflight.outputs.tag }}
           target_commitish: ${{ needs.preflight.outputs.ref }}
           name: ${{ needs.preflight.outputs.release_name }}
+          body_path: release-notes-preamble.md
           generate_release_notes: true
           previous_tag: ${{ needs.preflight.outputs.previous_tag }}
           prerelease: ${{ needs.preflight.outputs.is_prerelease }}
@@ -498,6 +513,7 @@ jobs:
           tag_name: ${{ needs.preflight.outputs.tag }}
           target_commitish: ${{ needs.preflight.outputs.ref }}
           name: ${{ needs.preflight.outputs.release_name }}
+          body_path: release-notes-preamble.md
           generate_release_notes: true
           prerelease: ${{ needs.preflight.outputs.is_prerelease }}
           make_latest: ${{ needs.preflight.outputs.make_latest }}

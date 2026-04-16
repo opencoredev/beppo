@@ -20,6 +20,7 @@ This document covers the unified release workflow for stable and nightly desktop
   - Only plain stable `X.Y.Z` releases are marked as the repository's latest release.
   - Nightly runs are always GitHub prereleases and never marked latest.
   - Automatically generated release notes are pinned to the previous tag in the same channel, so stable compares to the previous stable tag and nightly compares to the previous nightly tag.
+  - Every published release prepends a macOS unsigned-build note with the `xattr -dr com.apple.quarantine /Applications/Beppo.app` command so users have the first-run workaround directly on the GitHub release page.
 - Includes Electron auto-update metadata (for example `latest*.yml`, `nightly*.yml`, and `*.blockmap`) in release assets.
 - Publishes the CLI package (`apps/server`, npm package `t3`) with OIDC trusted publishing from the same workflow file:
   - stable releases publish npm dist-tag `latest`
@@ -91,7 +92,8 @@ Use this first to validate the release pipeline.
    - `git push origin v0.0.0-test.1`
 3. Wait for `.github/workflows/release.yml` to finish.
 4. Verify the GitHub Release contains all platform artifacts.
-5. Download each artifact and sanity-check installation on each OS.
+5. Confirm the release body includes the macOS unsigned-build note and `xattr` workaround when builds are unsigned.
+6. Download each artifact and sanity-check installation on each OS.
 
 ## 2) Apple signing + notarization setup (macOS)
 
