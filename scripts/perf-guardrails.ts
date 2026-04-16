@@ -141,6 +141,7 @@ function buildShellSnapshotFixture(readModel: OrchestrationReadModel): Orchestra
       workspaceRoot: project.workspaceRoot,
       repositoryIdentity: project.repositoryIdentity ?? null,
       defaultModelSelection: project.defaultModelSelection,
+      scripts: project.scripts,
       createdAt: project.createdAt,
       updatedAt: project.updatedAt,
     })),
