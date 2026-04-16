@@ -2,6 +2,15 @@ import { defineConfig, mergeConfig } from "vitest/config";
 
 import baseConfig from "../../vitest.config";
 
+const bunOnlyMigrationExcludes =
+  typeof Bun !== "undefined"
+    ? [
+        "src/persistence/Migrations/016_CanonicalizeModelSelections.test.ts",
+        "src/persistence/Migrations/019_ProjectionSnapshotLookupIndexes.test.ts",
+        "src/persistence/Migrations/024_BackfillProjectionThreadShellSummary.test.ts",
+      ]
+    : [];
+
 export default mergeConfig(
   baseConfig,
   defineConfig({
@@ -13,6 +22,7 @@ export default mergeConfig(
       // Under package-wide parallel runs they regularly exceed the default 15s budget.
       testTimeout: 60_000,
       hookTimeout: 60_000,
+      exclude: [...bunOnlyMigrationExcludes],
     },
   }),
 );
