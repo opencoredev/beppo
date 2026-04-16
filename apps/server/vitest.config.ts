@@ -1,4 +1,4 @@
-import { defineConfig, mergeConfig } from "vitest/config";
+import { configDefaults, defineConfig, mergeConfig } from "vitest/config";
 
 import baseConfig from "../../vitest.config";
 
@@ -22,7 +22,7 @@ export default mergeConfig(
       // Under package-wide parallel runs they regularly exceed the default 15s budget.
       testTimeout: 60_000,
       hookTimeout: 60_000,
-      exclude: [...bunOnlyMigrationExcludes],
+      exclude: [...configDefaults.exclude, ...bunOnlyMigrationExcludes],
     },
   }),
 );
