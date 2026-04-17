@@ -3,6 +3,7 @@
 import { spawnSync } from "node:child_process";
 
 const shouldSkip =
+  process.platform === "win32" ||
   process.env.VERCEL === "1" ||
   process.env.VERCEL === "true" ||
   process.env.T3_SKIP_EFFECT_PATCH === "1";
