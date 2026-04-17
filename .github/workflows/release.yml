@@ -192,9 +192,18 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Align package versions to release version
+        if: ${{ matrix.platform != 'win' }}
+        shell: bash
         env:
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
         run: node scripts/update-release-package-versions.ts "${RELEASE_VERSION}"
+
+      - name: Align package versions to release version
+        if: ${{ matrix.platform == 'win' }}
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        run: node scripts/update-release-package-versions.ts "$env:RELEASE_VERSION"
 
       - name: Build bundled web/server assets
         if: ${{ matrix.platform != 'win' }}
