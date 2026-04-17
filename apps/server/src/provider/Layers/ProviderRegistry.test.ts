@@ -517,6 +517,15 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
 
       it.effect("reruns codex health when codex provider settings change", () =>
         Effect.gen(function* () {
+          yield* withTempCodexHome(
+            [
+              'model_provider = "portkey"',
+              "",
+              "[model_providers.portkey]",
+              'base_url = "https://api.portkey.ai/v1"',
+              'env_key = "PORTKEY_API_KEY"',
+            ].join("\n"),
+          );
           const serverSettings = yield* makeMutableServerSettingsService();
           const scope = yield* Scope.make();
           yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
@@ -530,9 +539,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
                     return { stdout: "codex 1.0.0\n", stderr: "", code: 0 };
                   }
                   return { stdout: "", stderr: "spawn ENOENT", code: 1 };
-                }
-                if (joined === "login status") {
-                  return { stdout: "Logged in\n", stderr: "", code: 0 };
                 }
                 throw new Error(`Unexpected args: ${joined}`);
               }),
