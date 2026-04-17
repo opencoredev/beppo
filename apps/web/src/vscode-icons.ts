@@ -32,16 +32,18 @@ const manifest = vscodeIconsManifest as VscodeIconsManifest;
 const languageAssociations = languageAssociationsData as LanguageAssociations;
 const iconDefinitions = manifest.iconDefinitions;
 
-const darkFileNames = toLowercaseLookup(manifest.fileNames);
-const lightFileNames = toLowercaseLookup(manifest.light.fileNames);
-const darkFileExtensions = toLowercaseLookup(manifest.fileExtensions);
-const lightFileExtensions = toLowercaseLookup(manifest.light.fileExtensions);
-const darkFolderNames = toLowercaseLookup(manifest.folderNames);
-const lightFolderNames = toLowercaseLookup(manifest.light.folderNames);
-const darkLanguageIds = toLowercaseLookup(manifest.languageIds ?? {});
-const lightLanguageIds = toLowercaseLookup(manifest.light.languageIds ?? {});
-const languageIdByExtension = toLowercaseLookup(languageAssociations.extensionToLanguageId);
-const languageIdByFileName = toLowercaseLookup(languageAssociations.fileNameToLanguageId);
+let iconLookups: {
+  darkFileNames: Record<string, string>;
+  lightFileNames: Record<string, string>;
+  darkFileExtensions: Record<string, string>;
+  lightFileExtensions: Record<string, string>;
+  darkFolderNames: Record<string, string>;
+  lightFolderNames: Record<string, string>;
+  darkLanguageIds: Record<string, string>;
+  lightLanguageIds: Record<string, string>;
+  languageIdByExtension: Record<string, string>;
+  languageIdByFileName: Record<string, string>;
+} | null = null;
 const localLanguageIdByExtensionOverrides = {
   // Cursor rules files (*.mdc) are commonly treated as markdown in VSCode/Cursor.
   mdc: "markdown",
@@ -67,6 +69,27 @@ function toLowercaseLookup(source: Record<string, string>): Record<string, strin
     lookup[key.toLowerCase()] = value;
   }
   return lookup;
+}
+
+function getIconLookups() {
+  if (iconLookups) {
+    return iconLookups;
+  }
+
+  iconLookups = {
+    darkFileNames: toLowercaseLookup(manifest.fileNames),
+    lightFileNames: toLowercaseLookup(manifest.light.fileNames),
+    darkFileExtensions: toLowercaseLookup(manifest.fileExtensions),
+    lightFileExtensions: toLowercaseLookup(manifest.light.fileExtensions),
+    darkFolderNames: toLowercaseLookup(manifest.folderNames),
+    lightFolderNames: toLowercaseLookup(manifest.light.folderNames),
+    darkLanguageIds: toLowercaseLookup(manifest.languageIds ?? {}),
+    lightLanguageIds: toLowercaseLookup(manifest.light.languageIds ?? {}),
+    languageIdByExtension: toLowercaseLookup(languageAssociations.extensionToLanguageId),
+    languageIdByFileName: toLowercaseLookup(languageAssociations.fileNameToLanguageId),
+  };
+
+  return iconLookups;
 }
 
 export function basenameOfPath(pathValue: string): string {
@@ -107,6 +130,8 @@ function resolveLanguageFallbackDefinition(
   theme: "light" | "dark",
 ): string | null {
   const basename = basenameOfPath(pathValue).toLowerCase();
+  const { darkLanguageIds, languageIdByExtension, languageIdByFileName, lightLanguageIds } =
+    getIconLookups();
   const languageIds = theme === "light" ? lightLanguageIds : darkLanguageIds;
 
   const fromBasenameLanguage = languageIdByFileName[basename];
@@ -139,6 +164,8 @@ function iconFilenameForDefinitionKey(definitionKey: string | undefined): string
 
 function resolveFileDefinition(pathValue: string, theme: "light" | "dark"): string {
   const basename = basenameOfPath(pathValue).toLowerCase();
+  const { darkFileExtensions, darkFileNames, lightFileExtensions, lightFileNames } =
+    getIconLookups();
   const fileNames = theme === "light" ? lightFileNames : darkFileNames;
   const fileExtensions = theme === "light" ? lightFileExtensions : darkFileExtensions;
 
@@ -158,6 +185,7 @@ function resolveFileDefinition(pathValue: string, theme: "light" | "dark"): stri
 
 function resolveFolderDefinition(pathValue: string, theme: "light" | "dark"): string {
   const basename = basenameOfPath(pathValue).toLowerCase();
+  const { darkFolderNames, lightFolderNames } = getIconLookups();
   const folderNames = theme === "light" ? lightFolderNames : darkFolderNames;
   return (
     folderNames[basename] ??

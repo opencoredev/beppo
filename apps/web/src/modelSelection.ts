@@ -1,12 +1,15 @@
 import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
-  type ModelSelection,
+  type TextGenerationModelSelection,
   type ProviderKind,
   type ServerProvider,
 } from "@t3tools/contracts";
 import { normalizeModelSlug, resolveSelectableModel } from "@t3tools/shared/model";
 import { getComposerProviderState } from "./components/chat/composerProviderRegistry";
-import { UnifiedSettings } from "@t3tools/contracts/settings";
+import {
+  type OpenAICompatibleEndpointSettings,
+  UnifiedSettings,
+} from "@t3tools/contracts/settings";
 import {
   getDefaultServerModel,
   getProviderModels,
@@ -171,12 +174,28 @@ export function getCustomModelOptionsByProvider(
 export function resolveAppModelSelectionState(
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
-): ModelSelection {
+): TextGenerationModelSelection {
   const selection = settings.textGenerationModelSelection ?? {
     provider: "codex" as const,
     model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
   };
-  const provider = resolveSelectableProvider(providers, selection.provider);
+
+  const enabledCustomEndpoints = settings.providers.openaiCompatible.endpoints.filter(
+    (endpoint) => endpoint.enabled,
+  );
+  const selectedCustomEndpoint =
+    selection.provider === "openaiCompatible"
+      ? enabledCustomEndpoints.find((endpoint) => endpoint.id === selection.endpointId)
+      : undefined;
+
+  if (selection.provider === "openaiCompatible" && selectedCustomEndpoint) {
+    return resolveOpenAICompatibleTextGenerationSelection(selection, selectedCustomEndpoint);
+  }
+
+  const provider = resolveSelectableProvider(
+    providers,
+    selection.provider === "openaiCompatible" ? null : selection.provider,
+  );
 
   // When the provider changed due to fallback (e.g. selected provider was disabled),
   // don't carry over the old provider's model — use the fallback provider's default.
@@ -188,7 +207,8 @@ export function resolveAppModelSelectionState(
     models: getProviderModels(providers, provider),
     prompt: "",
     modelOptions: {
-      [provider]: provider === selection.provider ? selection.options : undefined,
+      [provider]:
+        provider === selection.provider && "options" in selection ? selection.options : undefined,
     },
   });
 
@@ -196,5 +216,16 @@ export function resolveAppModelSelectionState(
     provider,
     model,
     ...(modelOptionsForDispatch ? { options: modelOptionsForDispatch } : {}),
+  };
+}
+
+function resolveOpenAICompatibleTextGenerationSelection(
+  selection: Extract<TextGenerationModelSelection, { provider: "openaiCompatible" }>,
+  endpoint: OpenAICompatibleEndpointSettings,
+): TextGenerationModelSelection {
+  return {
+    provider: "openaiCompatible",
+    endpointId: endpoint.id,
+    model: endpoint.model,
   };
 }

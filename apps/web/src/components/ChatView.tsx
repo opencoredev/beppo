@@ -9,6 +9,7 @@ import {
   type ProjectEntry,
   type ProjectId,
   type ProviderApprovalDecision,
+  PROVIDER_DISPLAY_NAMES,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   type ServerProvider,
@@ -22,7 +23,16 @@ import {
 } from "@t3tools/contracts";
 import { applyClaudePromptEffortPrefix, normalizeModelSlug } from "@t3tools/shared/model";
 import { truncate } from "@t3tools/shared/String";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate, useSearch } from "@tanstack/react-router";
@@ -89,7 +99,6 @@ import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import BranchToolbar from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
-import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   BotIcon,
   ChevronDownIcon,
@@ -97,8 +106,11 @@ import {
   ChevronRightIcon,
   CircleAlertIcon,
   ListTodoIcon,
+  LoaderCircleIcon,
   LockIcon,
   LockOpenIcon,
+  MicIcon,
+  SquareIcon,
   XIcon,
 } from "lucide-react";
 import { Button } from "./ui/button";
@@ -156,7 +168,6 @@ import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
-import { RateLimitsPanel } from "./RateLimitsPanel";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { AVAILABLE_PROVIDER_OPTIONS, ProviderModelPicker } from "./chat/ProviderModelPicker";
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
@@ -173,6 +184,7 @@ import {
 } from "./chat/composerProviderRegistry";
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
+import { formatVoiceRecordingDuration, useVoiceRecorder } from "../lib/voiceRecorder";
 import {
   buildExpiredTerminalContextToastCopy,
   buildLocalDraftThread,
@@ -198,6 +210,9 @@ import {
   useServerConfig,
   useServerKeybindings,
 } from "~/rpc/serverState";
+import { deriveLatestActivityRateLimitSnapshot } from "../lib/rateLimits";
+
+const ThreadTerminalDrawer = lazy(() => import("./ThreadTerminalDrawer"));
 
 const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
@@ -205,6 +220,29 @@ const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
+const COMPOSER_SLASH_COMMAND_ITEMS = [
+  {
+    id: "slash:model",
+    type: "slash-command",
+    command: "model",
+    label: "/model",
+    description: "Switch response model for this thread",
+  },
+  {
+    id: "slash:plan",
+    type: "slash-command",
+    command: "plan",
+    label: "/plan",
+    description: "Switch this thread into plan mode",
+  },
+  {
+    id: "slash:default",
+    type: "slash-command",
+    command: "default",
+    label: "/default",
+    description: "Switch this thread back to normal chat mode",
+  },
+] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 
@@ -296,9 +334,27 @@ function formatOutgoingPrompt(params: {
   }
   return params.text;
 }
+
+function appendVoiceTranscript(currentPrompt: string, transcript: string): string {
+  const trimmedPrompt = currentPrompt.trim();
+  if (trimmedPrompt.length === 0) {
+    return transcript;
+  }
+  return `${currentPrompt}\n\n${transcript}`;
+}
 const COMPOSER_PATH_QUERY_DEBOUNCE_MS = 120;
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
+
+function TerminalDrawerLoadingShell({ height }: { height: number }) {
+  return (
+    <aside
+      className="thread-terminal-drawer relative flex min-w-0 shrink-0 flex-col overflow-hidden border-t border-border/80 bg-background"
+      style={{ height: `${height}px` }}
+      aria-hidden="true"
+    />
+  );
+}
 
 const extendReplacementRangeForTrailingSpace = (
   text: string,
@@ -327,6 +383,57 @@ const terminalContextIdListsEqual = (
   ids: ReadonlyArray<string>,
 ): boolean =>
   contexts.length === ids.length && contexts.every((context, index) => context.id === ids[index]);
+
+function sanitizeVoiceErrorMessage(message: string): string {
+  const normalized = message.trim();
+  if (normalized.length === 0) {
+    return "The voice note could not be transcribed.";
+  }
+
+  const firstLine = normalized.split("\n")[0]?.trim() ?? normalized;
+  const withoutInlineStack = firstLine.replace(/\s+at file:\/\/.*$/s, "").trim();
+  const withoutRemoteMethodPrefix = withoutInlineStack.replace(
+    /^Error invoking remote method ['"][^'"]+['"]:\s*/i,
+    "",
+  );
+  const withoutRepeatedErrorPrefix = withoutRemoteMethodPrefix.replace(/^(Error:\s*)+/i, "").trim();
+
+  return withoutRepeatedErrorPrefix.length > 0
+    ? withoutRepeatedErrorPrefix
+    : "The voice note could not be transcribed.";
+}
+
+function isMicrophonePermissionDenied(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return (
+    error.name === "NotAllowedError" ||
+    error.name === "PermissionDeniedError" ||
+    /permission denied/i.test(error.message)
+  );
+}
+
+function describeVoiceRecordingStartError(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return "The microphone could not be opened.";
+  }
+
+  if (isMicrophonePermissionDenied(error)) {
+    return "Microphone access was denied. Enable it for Beppo in your system settings, then try again.";
+  }
+  if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
+    return "No microphone was found. Connect one and try again.";
+  }
+  if (error.name === "NotReadableError" || error.name === "TrackStartError") {
+    return "The microphone is busy or unavailable right now. Close other audio apps and try again.";
+  }
+  if (error.name === "SecurityError") {
+    return "Microphone access is blocked in this environment.";
+  }
+
+  return sanitizeVoiceErrorMessage(error.message);
+}
 
 interface ChatViewProps {
   threadId: ThreadId;
@@ -559,6 +666,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const activeComposerMenuItemRef = useRef<ComposerCommandItem | null>(null);
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewHandoffTimeoutByMessageIdRef = useRef<Record<string, number>>({});
+  const voiceTranscriptionRequestIdRef = useRef(0);
+  const voiceThreadIdRef = useRef(threadId);
   const sendInFlightRef = useRef(false);
   const dragDepthRef = useRef(0);
   const terminalOpenByThreadRef = useRef<Record<string, boolean>>({});
@@ -812,6 +921,19 @@ export default function ChatView({ threadId }: ChatViewProps) {
     selectedProviderByThreadId ?? threadProvider ?? "codex",
   );
   const selectedProvider: ProviderKind = lockedProvider ?? unlockedSelectedProvider;
+  const activeProviderStatus = useMemo(
+    () => providerStatuses.find((status) => status.provider === selectedProvider) ?? null,
+    [providerStatuses, selectedProvider],
+  );
+  const {
+    isRecording: isVoiceRecording,
+    durationMs: voiceRecordingDurationMs,
+    startRecording: startVoiceRecording,
+    stopRecording: stopVoiceRecording,
+    cancelRecording: cancelVoiceRecording,
+  } = useVoiceRecorder();
+  const [isVoiceTranscribing, setIsVoiceTranscribing] = useState(false);
+  voiceThreadIdRef.current = threadId;
   const { modelOptions: composerModelOptions, selectedModel } = useEffectiveComposerModelState({
     threadId,
     providers: providerStatuses,
@@ -843,8 +965,43 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [selectedModel, selectedModelOptionsForDispatch, selectedProvider],
   );
   const selectedModelForPicker = selectedModel;
+  const voiceRecordingDurationLabel = useMemo(
+    () => formatVoiceRecordingDuration(voiceRecordingDurationMs),
+    [voiceRecordingDurationMs],
+  );
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
+  const activeRateLimitSnapshot = useMemo(
+    () => deriveLatestActivityRateLimitSnapshot(threadActivities),
+    [threadActivities],
+  );
+  const compactComposerProviderSummary = useMemo(
+    () => ({
+      provider: selectedProvider,
+      providerLabel: PROVIDER_DISPLAY_NAMES[selectedProvider] ?? selectedProvider,
+      modelLabel: selectedModel,
+      rateLimitEntries: activeRateLimitSnapshot?.entries ?? [],
+    }),
+    [activeRateLimitSnapshot?.entries, selectedModel, selectedProvider],
+  );
+  const compactComposerQuickCommands = useMemo(
+    () =>
+      COMPOSER_SLASH_COMMAND_ITEMS.map(({ command, label, description }) => ({
+        command,
+        label,
+        description,
+      })),
+    [],
+  );
+  const compactComposerProjectScripts = useMemo(
+    () =>
+      (activeProject?.scripts ?? []).map((script) => ({
+        id: script.id,
+        name: script.name,
+        command: script.command,
+      })),
+    [activeProject?.scripts],
+  );
   const workLogEntries = useMemo(
     () => deriveWorkLogEntries(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
@@ -917,6 +1074,185 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => deriveActivePlanState(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
   );
+  const handleVoicePermissionFailure = useCallback(async (error: unknown) => {
+    const api = readNativeApi();
+    toastManager.add({
+      type: "error",
+      title: "Microphone access is required",
+      description: describeVoiceRecordingStartError(error),
+      ...(api
+        ? {
+            actionProps: {
+              children: "Open system settings",
+              onClick: () => {
+                const nextApi = readNativeApi();
+                if (!nextApi) return;
+                void nextApi.microphone.openSystemSettings().then((opened) => {
+                  if (opened) {
+                    return;
+                  }
+                  toastManager.add({
+                    type: "info",
+                    title: "Open microphone settings manually",
+                    description:
+                      "Enable microphone access for Beppo in your system privacy settings, then try again.",
+                  });
+                });
+              },
+            },
+          }
+        : {}),
+    });
+  }, []);
+  const handleStartVoiceNote = useCallback(async () => {
+    if (selectedProvider !== "codex") {
+      toastManager.add({
+        type: "info",
+        title: "Voice notes currently require Codex",
+        description: "Switch this thread to Codex before recording a voice note.",
+      });
+      return;
+    }
+    if (activeProviderStatus && activeProviderStatus.status !== "ready") {
+      toastManager.add({
+        type: "error",
+        title: "Voice notes require Codex to be available.",
+        ...(activeProviderStatus.message ? { description: activeProviderStatus.message } : {}),
+      });
+      return;
+    }
+    if (activeProviderStatus?.auth.status === "unauthenticated") {
+      toastManager.add({
+        type: "error",
+        title: "Sign in to ChatGPT in Codex before using voice notes.",
+      });
+      return;
+    }
+    if (
+      promptRef.current.trim().length > 0 ||
+      composerImagesRef.current.length > 0 ||
+      composerTerminalContextsRef.current.length > 0
+    ) {
+      toastManager.add({
+        type: "warning",
+        title: "Send or clear the current draft before recording a voice note.",
+      });
+      return;
+    }
+
+    try {
+      await startVoiceRecording();
+    } catch (error) {
+      if (isMicrophonePermissionDenied(error)) {
+        await handleVoicePermissionFailure(error);
+        return;
+      }
+      toastManager.add({
+        type: "error",
+        title: "Couldn't start voice note",
+        description: describeVoiceRecordingStartError(error),
+      });
+    }
+  }, [activeProviderStatus, handleVoicePermissionFailure, selectedProvider, startVoiceRecording]);
+  const handleFinishVoiceNote = useCallback(async () => {
+    const api = readNativeApi();
+    if (!api) {
+      await cancelVoiceRecording();
+      return;
+    }
+
+    const cwd = activeThread?.worktreePath ?? activeProject?.cwd ?? serverConfig?.cwd ?? null;
+    if (!cwd) {
+      await cancelVoiceRecording();
+      toastManager.add({
+        type: "error",
+        title: "Couldn't transcribe voice note",
+        description: "Beppo could not resolve a workspace path for this thread.",
+      });
+      return;
+    }
+
+    const requestId = voiceTranscriptionRequestIdRef.current + 1;
+    voiceTranscriptionRequestIdRef.current = requestId;
+    const requestThreadId = threadId;
+    const isCurrentVoiceRequest = () =>
+      voiceTranscriptionRequestIdRef.current === requestId &&
+      voiceThreadIdRef.current === requestThreadId;
+
+    setIsVoiceTranscribing(true);
+    try {
+      const payload = await stopVoiceRecording();
+      if (!isCurrentVoiceRequest()) {
+        return;
+      }
+      if (!payload) {
+        toastManager.add({
+          type: "warning",
+          title: "Voice note was empty",
+          description: "Try recording again with a little more audio.",
+        });
+        return;
+      }
+      const result = await api.server.transcribeVoice({
+        provider: "codex",
+        cwd,
+        ...(activeThread?.id ? { threadId: activeThread.id } : {}),
+        ...payload,
+      });
+      if (!isCurrentVoiceRequest()) {
+        return;
+      }
+      const nextPrompt = appendVoiceTranscript(promptRef.current, result.text);
+      promptRef.current = nextPrompt;
+      setPrompt(nextPrompt);
+      const nextCursor = collapseExpandedComposerCursor(nextPrompt, nextPrompt.length);
+      setComposerCursor(nextCursor);
+      setComposerTrigger(detectComposerTrigger(nextPrompt, nextPrompt.length));
+      window.requestAnimationFrame(() => {
+        composerEditorRef.current?.focusAt(nextCursor);
+      });
+      toastManager.add({
+        type: "success",
+        title: "Voice note added",
+        description: "Your transcript was inserted into the composer.",
+      });
+    } catch (error) {
+      if (!isCurrentVoiceRequest()) {
+        return;
+      }
+      toastManager.add({
+        type: "error",
+        title: "Couldn't transcribe voice note",
+        description:
+          error instanceof Error
+            ? sanitizeVoiceErrorMessage(error.message)
+            : "Beppo could not transcribe the recorded voice note.",
+      });
+    } finally {
+      if (isCurrentVoiceRequest()) {
+        setIsVoiceTranscribing(false);
+      }
+    }
+  }, [
+    activeProject?.cwd,
+    activeThread?.id,
+    activeThread?.worktreePath,
+    cancelVoiceRecording,
+    serverConfig?.cwd,
+    setPrompt,
+    stopVoiceRecording,
+    threadId,
+  ]);
+  const handleVoiceButton = useCallback(async () => {
+    if (isVoiceTranscribing) {
+      return;
+    }
+    if (isVoiceRecording) {
+      await handleFinishVoiceNote();
+      return;
+    }
+    await handleStartVoiceNote();
+  }, [handleFinishVoiceNote, handleStartVoiceNote, isVoiceRecording, isVoiceTranscribing]);
   const showPlanFollowUpPrompt =
     pendingUserInputs.length === 0 &&
     interactionMode === "plan" &&
@@ -1269,36 +1605,33 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
 
     if (composerTrigger.kind === "slash-command") {
-      const slashCommandItems = [
-        {
-          id: "slash:model",
-          type: "slash-command",
-          command: "model",
-          label: "/model",
-          description: "Switch response model for this thread",
-        },
-        {
-          id: "slash:plan",
-          type: "slash-command",
-          command: "plan",
-          label: "/plan",
-          description: "Switch this thread into plan mode",
-        },
-        {
-          id: "slash:default",
-          type: "slash-command",
-          command: "default",
-          label: "/default",
-          description: "Switch this thread back to normal chat mode",
-        },
-      ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const query = composerTrigger.query.trim().toLowerCase();
-      if (!query) {
-        return [...slashCommandItems];
-      }
-      return slashCommandItems.filter(
-        (item) => item.command.includes(query) || item.label.slice(1).includes(query),
-      );
+      const slashCommandItems = !query
+        ? COMPOSER_SLASH_COMMAND_ITEMS
+        : COMPOSER_SLASH_COMMAND_ITEMS.filter(
+            (item) => item.command.includes(query) || item.label.slice(1).includes(query),
+          );
+      const projectScriptItems = (activeProject?.scripts ?? [])
+        .filter((script) => {
+          if (!query) return true;
+          const searchName = script.name.toLowerCase();
+          const searchCommand = script.command.toLowerCase();
+          const searchId = script.id.toLowerCase();
+          return (
+            searchName.includes(query) || searchCommand.includes(query) || searchId.includes(query)
+          );
+        })
+        .map(
+          (script) =>
+            ({
+              id: `script:${script.id}`,
+              type: "project-script",
+              scriptId: script.id,
+              label: `$ ${script.name}`,
+              description: script.command,
+            }) satisfies Extract<ComposerCommandItem, { type: "project-script" }>,
+        );
+      return [...slashCommandItems, ...projectScriptItems];
     }
 
     return searchableModelOptions
@@ -1317,7 +1650,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         label: name,
         description: `${providerLabel} · ${slug}`,
       }));
-  }, [composerTrigger, searchableModelOptions, workspaceEntries]);
+  }, [activeProject?.scripts, composerTrigger, searchableModelOptions, workspaceEntries]);
   const composerMenuOpen = Boolean(composerTrigger);
   const activeComposerMenuItem = useMemo(
     () =>
@@ -1333,10 +1666,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => new Set(nonPersistedComposerImageIds),
     [nonPersistedComposerImageIds],
   );
-  const activeProviderStatus = useMemo(
-    () => providerStatuses.find((status) => status.provider === selectedProvider) ?? null,
-    [selectedProvider, providerStatuses],
-  );
+  const showVoiceControl =
+    selectedProvider === "codex" &&
+    activeProject !== undefined &&
+    !activePendingApproval &&
+    activePendingProgress === null &&
+    !showPlanFollowUpPrompt;
   const activeProjectCwd = activeProject?.cwd ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
   const threadTerminalRuntimeEnv = useMemo(() => {
@@ -2253,6 +2588,21 @@ export default function ChatView({ threadId }: ChatViewProps) {
     setIsDragOverComposer(false);
     setExpandedImage(null);
   }, [resetLocalDispatch, threadId]);
+
+  useEffect(() => {
+    voiceTranscriptionRequestIdRef.current += 1;
+    setIsVoiceTranscribing(false);
+    void cancelVoiceRecording();
+  }, [cancelVoiceRecording, threadId]);
+
+  useEffect(() => {
+    if (showVoiceControl || (!isVoiceRecording && !isVoiceTranscribing)) {
+      return;
+    }
+    voiceTranscriptionRequestIdRef.current += 1;
+    setIsVoiceTranscribing(false);
+    void cancelVoiceRecording();
+  }, [cancelVoiceRecording, isVoiceRecording, isVoiceTranscribing, showVoiceControl]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3500,6 +3850,69 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [activePendingProgress?.activeQuestion, activePendingUserInput, setPrompt],
   );
 
+  const handleComposerSlashCommandSelection = useCallback(
+    (
+      command: "model" | "plan" | "default",
+      snapshot: { value: string },
+      trigger: ComposerTrigger,
+    ) => {
+      if (command === "model") {
+        const replacement = "/model ";
+        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+          snapshot.value,
+          trigger.rangeEnd,
+          replacement,
+        );
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          replacementRangeEnd,
+          replacement,
+          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+        );
+        if (applied) {
+          setComposerHighlightedItemId(null);
+        }
+        return;
+      }
+      void handleInteractionModeChange(command === "plan" ? "plan" : "default");
+      const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+        expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+      });
+      if (applied) {
+        setComposerHighlightedItemId(null);
+      }
+    },
+    [applyPromptReplacement, handleInteractionModeChange],
+  );
+
+  const onSelectCompactQuickCommand = useCallback(
+    (command: "model" | "plan" | "default") => {
+      if (command === "model") {
+        const nextPrompt = "/model ";
+        promptRef.current = nextPrompt;
+        setPrompt(nextPrompt);
+        const nextCursor = collapseExpandedComposerCursor(nextPrompt, nextPrompt.length);
+        setComposerCursor(nextCursor);
+        setComposerTrigger(detectComposerTrigger(nextPrompt, nextPrompt.length));
+        scheduleComposerFocus();
+        return;
+      }
+
+      void handleInteractionModeChange(command === "plan" ? "plan" : "default");
+      scheduleComposerFocus();
+    },
+    [handleInteractionModeChange, scheduleComposerFocus, setPrompt],
+  );
+
+  const runProjectScriptById = useCallback(
+    (scriptId: string) => {
+      const script = activeProject?.scripts.find((entry) => entry.id === scriptId);
+      if (!script) return;
+      void runProjectScript(script);
+    },
+    [activeProject?.scripts, runProjectScript],
+  );
+
   const readComposerSnapshot = useCallback((): {
     value: string;
     cursor: number;
@@ -3557,25 +3970,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return;
       }
       if (item.type === "slash-command") {
-        if (item.command === "model") {
-          const replacement = "/model ";
-          const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
-            snapshot.value,
-            trigger.rangeEnd,
-            replacement,
-          );
-          const applied = applyPromptReplacement(
-            trigger.rangeStart,
-            replacementRangeEnd,
-            replacement,
-            { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
-          );
-          if (applied) {
-            setComposerHighlightedItemId(null);
-          }
-          return;
-        }
-        void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
+        handleComposerSlashCommandSelection(item.command, snapshot, trigger);
+        return;
+      }
+      if (item.type === "project-script") {
+        runProjectScriptById(item.scriptId);
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
         });
@@ -3594,9 +3993,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [
       applyPromptReplacement,
-      handleInteractionModeChange,
+      handleComposerSlashCommandSelection,
       onProviderModelSelect,
       resolveActiveComposerTrigger,
+      runProjectScriptById,
     ],
   );
   const onComposerMenuItemHighlighted = useCallback((itemId: string | null) => {
@@ -4100,8 +4500,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
                             )}
                             interactionMode={interactionMode}
                             planSidebarOpen={planSidebarOpen}
+                            providerSummary={compactComposerProviderSummary}
+                            quickCommands={compactComposerQuickCommands}
+                            projectScripts={compactComposerProjectScripts}
                             runtimeMode={runtimeMode}
                             traitsMenuContent={providerTraitsMenuContent}
+                            onSelectQuickCommand={onSelectCompactQuickCommand}
+                            onRunProjectScript={runProjectScriptById}
                             onToggleInteractionMode={toggleInteractionMode}
                             onTogglePlanSidebar={togglePlanSidebar}
                             onToggleRuntimeMode={toggleRuntimeMode}
@@ -4212,7 +4617,53 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         {activeContextWindow ? (
                           <ContextWindowMeter usage={activeContextWindow} />
                         ) : null}
-                        <RateLimitsPanel activities={threadActivities} />
+                        {showVoiceControl ? (
+                          <button
+                            type="button"
+                            className={cn(
+                              "flex h-9 min-w-9 items-center justify-center rounded-full border border-border/70 bg-background/80 px-3 text-foreground transition-all duration-150 sm:h-8",
+                              isVoiceRecording
+                                ? "border-rose-400/60 bg-rose-500/10 text-rose-400 hover:bg-rose-500/15"
+                                : "hover:bg-accent hover:text-foreground",
+                              isVoiceTranscribing && "opacity-70",
+                            )}
+                            onClick={() => void handleVoiceButton()}
+                            disabled={
+                              isVoiceTranscribing ||
+                              isConnecting ||
+                              isSendBusy ||
+                              isPreparingWorktree ||
+                              phase === "running"
+                            }
+                            aria-label={
+                              isVoiceTranscribing
+                                ? "Transcribing voice note"
+                                : isVoiceRecording
+                                  ? `Finish voice note (${voiceRecordingDurationLabel})`
+                                  : "Record voice note"
+                            }
+                            title={
+                              isVoiceTranscribing
+                                ? "Transcribing voice note"
+                                : isVoiceRecording
+                                  ? `Finish voice note (${voiceRecordingDurationLabel})`
+                                  : "Record voice note"
+                            }
+                          >
+                            {isVoiceTranscribing ? (
+                              <LoaderCircleIcon className="size-4 animate-spin" />
+                            ) : isVoiceRecording ? (
+                              <span className="flex items-center gap-2">
+                                <SquareIcon className="size-3.5 fill-current" />
+                                <span className="hidden text-[11px] font-medium tabular-nums sm:inline">
+                                  {voiceRecordingDurationLabel}
+                                </span>
+                              </span>
+                            ) : (
+                              <MicIcon className="size-4" />
+                            )}
+                          </button>
+                        ) : null}
                         {isPreparingWorktree ? (
                           <span className="text-muted-foreground/70 text-xs">
                             Preparing worktree...
@@ -4306,27 +4757,29 @@ export default function ChatView({ threadId }: ChatViewProps) {
           return null;
         }
         return (
-          <ThreadTerminalDrawer
-            key={activeThread.id}
-            threadId={activeThread.id}
-            cwd={gitCwd ?? activeProject.cwd}
-            runtimeEnv={threadTerminalRuntimeEnv}
-            height={terminalState.terminalHeight}
-            terminalIds={terminalState.terminalIds}
-            activeTerminalId={terminalState.activeTerminalId}
-            terminalGroups={terminalState.terminalGroups}
-            activeTerminalGroupId={terminalState.activeTerminalGroupId}
-            focusRequestId={terminalFocusRequestId}
-            onSplitTerminal={splitTerminal}
-            onNewTerminal={createNewTerminal}
-            splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
-            newShortcutLabel={newTerminalShortcutLabel ?? undefined}
-            closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
-            onActiveTerminalChange={activateTerminal}
-            onCloseTerminal={closeTerminal}
-            onHeightChange={setTerminalHeight}
-            onAddTerminalContext={addTerminalContextToDraft}
-          />
+          <Suspense fallback={<TerminalDrawerLoadingShell height={terminalState.terminalHeight} />}>
+            <ThreadTerminalDrawer
+              key={activeThread.id}
+              threadId={activeThread.id}
+              cwd={gitCwd ?? activeProject.cwd}
+              runtimeEnv={threadTerminalRuntimeEnv}
+              height={terminalState.terminalHeight}
+              terminalIds={terminalState.terminalIds}
+              activeTerminalId={terminalState.activeTerminalId}
+              terminalGroups={terminalState.terminalGroups}
+              activeTerminalGroupId={terminalState.activeTerminalGroupId}
+              focusRequestId={terminalFocusRequestId}
+              onSplitTerminal={splitTerminal}
+              onNewTerminal={createNewTerminal}
+              splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
+              newShortcutLabel={newTerminalShortcutLabel ?? undefined}
+              closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
+              onActiveTerminalChange={activateTerminal}
+              onCloseTerminal={closeTerminal}
+              onHeightChange={setTerminalHeight}
+              onAddTerminalContext={addTerminalContextToDraft}
+            />
+          </Suspense>
         );
       })()}
 

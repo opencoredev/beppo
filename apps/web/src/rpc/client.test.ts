@@ -126,6 +126,7 @@ describe("WsRpcAtomClient", () => {
         model: "gpt-5.4",
       },
       providers: {
+        ...DEFAULT_SERVER_SETTINGS.providers,
         codex: {
           ...DEFAULT_SERVER_SETTINGS.providers.codex,
           homePath: "/tmp/codex-home",
@@ -176,6 +177,7 @@ describe("WsRpcAtomClient", () => {
         model: "gpt-5.4",
       },
       providers: {
+        ...DEFAULT_SERVER_SETTINGS.providers,
         codex: {
           ...DEFAULT_SERVER_SETTINGS.providers.codex,
           homePath: "/tmp/codex-home",

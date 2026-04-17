@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { TrimmedNonEmptyString } from "./baseSchemas";
-import type { ProviderKind } from "./orchestration";
+import type { ProviderKind, TextGenerationProviderKind } from "./orchestration";
 
 export const CODEX_REASONING_EFFORT_OPTIONS = ["xhigh", "high", "medium", "low"] as const;
 export type CodexReasoningEffort = (typeof CODEX_REASONING_EFFORT_OPTIONS)[number];
@@ -59,9 +59,13 @@ export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderKind, string> = {
 export const DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.codex;
 
 /** Per-provider text generation model defaults. */
-export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Record<ProviderKind, string> = {
+export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Record<
+  TextGenerationProviderKind,
+  string
+> = {
   codex: "gpt-5.4-mini",
   claudeAgent: "claude-haiku-4-5",
+  openaiCompatible: "gpt-4.1-mini",
 };
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string, string>> = {

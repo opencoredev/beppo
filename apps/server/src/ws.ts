@@ -7,11 +7,13 @@ import {
   type OrchestrationEvent,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
+  OrchestrationGetThreadSnapshotError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
+  ServerVoiceTranscriptionError,
   type TerminalEvent,
   WS_METHODS,
   WsRpcGroup,
@@ -34,6 +36,7 @@ import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
 import { ServerSettingsService } from "./serverSettings";
 import { TerminalManager } from "./terminal/Services/Manager";
+import { resolveCodexVoiceAuth, transcribeVoiceWithChatGptSession } from "./voiceTranscription";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths";
@@ -60,6 +63,16 @@ function isAllowedOrigin(origin: string | undefined, devUrl?: string): boolean {
   } catch {
     return false;
   }
+}
+
+function toServerVoiceTranscriptionError(cause: unknown): ServerVoiceTranscriptionError {
+  return new ServerVoiceTranscriptionError({
+    detail:
+      cause instanceof Error && cause.message.trim().length > 0
+        ? cause.message.trim()
+        : "Voice transcription failed.",
+    cause,
+  });
 }
 
 const WsRpcLayer = WsRpcGroup.toLayer(
@@ -97,12 +110,23 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     });
 
     return WsRpcGroup.of({
-      [ORCHESTRATION_WS_METHODS.getSnapshot]: (_input) =>
-        projectionSnapshotQuery.getSnapshot().pipe(
+      [ORCHESTRATION_WS_METHODS.getSnapshot]: (input) =>
+        projectionSnapshotQuery.getSnapshot(input).pipe(
           Effect.mapError(
             (cause) =>
               new OrchestrationGetSnapshotError({
                 message: "Failed to load orchestration snapshot",
+                cause,
+              }),
+          ),
+        ),
+      [ORCHESTRATION_WS_METHODS.getThreadSnapshot]: (input) =>
+        projectionSnapshotQuery.getThreadSnapshot(input.threadId).pipe(
+          Effect.map(Option.getOrNull),
+          Effect.mapError(
+            (cause) =>
+              new OrchestrationGetThreadSnapshotError({
+                message: "Failed to load thread snapshot",
                 cause,
               }),
           ),
@@ -223,6 +247,41 @@ const WsRpcLayer = WsRpcGroup.toLayer(
         }),
       [WS_METHODS.serverGetSettings]: (_input) => serverSettings.getSettings,
       [WS_METHODS.serverUpdateSettings]: ({ patch }) => serverSettings.updateSettings(patch),
+      [WS_METHODS.serverTranscribeVoice]: (input) =>
+        Effect.gen(function* () {
+          if (input.provider !== "codex") {
+            return yield* new ServerVoiceTranscriptionError({
+              detail: "Voice transcription is currently only available for Codex.",
+            });
+          }
+
+          const settings = yield* serverSettings.getSettings.pipe(
+            Effect.mapError(toServerVoiceTranscriptionError),
+          );
+          if (!settings.providers.codex.enabled) {
+            return yield* new ServerVoiceTranscriptionError({
+              detail: "Codex voice transcription is disabled in Beppo settings.",
+            });
+          }
+
+          const homePath = settings.providers.codex.homePath.trim();
+          return yield* Effect.tryPromise({
+            try: (signal) =>
+              transcribeVoiceWithChatGptSession({
+                request: input,
+                signal,
+                resolveAuth: (refreshToken) =>
+                  resolveCodexVoiceAuth({
+                    binaryPath: settings.providers.codex.binaryPath,
+                    cwd: input.cwd,
+                    ...(homePath ? { homePath } : {}),
+                    refreshToken,
+                    signal,
+                  }),
+              }),
+            catch: toServerVoiceTranscriptionError,
+          });
+        }),
       [WS_METHODS.projectsSearchEntries]: (input) =>
         workspaceEntries.search(input).pipe(
           Effect.mapError(

@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import {
   IsoDateTime,
+  PositiveInt,
   NonNegativeInt,
   ProjectId,
   ThreadId,
@@ -56,6 +57,28 @@ export const ServerProviderModel = Schema.Struct({
 });
 export type ServerProviderModel = typeof ServerProviderModel.Type;
 
+export const ServerProviderSupportLevel = Schema.Literals([
+  "stable",
+  "experimental",
+  "unavailable",
+]);
+export type ServerProviderSupportLevel = typeof ServerProviderSupportLevel.Type;
+
+export const ServerProviderRuntimeTransport = Schema.Literals(["native-cli", "acp", "unavailable"]);
+export type ServerProviderRuntimeTransport = typeof ServerProviderRuntimeTransport.Type;
+
+export const ServerProviderRuntimeSupport = Schema.Struct({
+  transport: ServerProviderRuntimeTransport,
+  runtime: ServerProviderSupportLevel,
+  sessionStart: ServerProviderSupportLevel,
+  sendTurn: ServerProviderSupportLevel,
+  resumeSession: ServerProviderSupportLevel,
+  rollbackThread: ServerProviderSupportLevel,
+  sessionModelSwitch: Schema.Literals(["in-session", "restart-session", "unsupported"]),
+  notes: Schema.optional(TrimmedNonEmptyString),
+});
+export type ServerProviderRuntimeSupport = typeof ServerProviderRuntimeSupport.Type;
+
 export const ServerProvider = Schema.Struct({
   provider: ProviderKind,
   enabled: Schema.Boolean,
@@ -65,6 +88,9 @@ export const ServerProvider = Schema.Struct({
   auth: ServerProviderAuth,
   checkedAt: IsoDateTime,
   message: Schema.optional(TrimmedNonEmptyString),
+  experimental: Schema.optional(Schema.Boolean),
+  runtimeSupport: Schema.optional(ServerProviderRuntimeSupport),
+  rateLimits: Schema.optional(Schema.Unknown),
   models: Schema.Array(ServerProviderModel),
 });
 export type ServerProvider = typeof ServerProvider.Type;
@@ -193,3 +219,31 @@ export const ServerProviderUpdatedPayload = Schema.Struct({
   providers: ServerProviders,
 });
 export type ServerProviderUpdatedPayload = typeof ServerProviderUpdatedPayload.Type;
+
+export const ServerVoiceTranscriptionInput = Schema.Struct({
+  provider: ProviderKind,
+  cwd: TrimmedNonEmptyString,
+  threadId: Schema.optional(ThreadId),
+  audioBase64: TrimmedNonEmptyString,
+  mimeType: TrimmedNonEmptyString,
+  sampleRateHz: PositiveInt,
+  durationMs: PositiveInt,
+});
+export type ServerVoiceTranscriptionInput = typeof ServerVoiceTranscriptionInput.Type;
+
+export const ServerVoiceTranscriptionResult = Schema.Struct({
+  text: TrimmedNonEmptyString,
+});
+export type ServerVoiceTranscriptionResult = typeof ServerVoiceTranscriptionResult.Type;
+
+export class ServerVoiceTranscriptionError extends Schema.TaggedErrorClass<ServerVoiceTranscriptionError>()(
+  "ServerVoiceTranscriptionError",
+  {
+    detail: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}

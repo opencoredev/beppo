@@ -17,7 +17,7 @@ function readErrorMessage(response: JsonRpcProbeResponse): string | undefined {
 export function buildCodexInitializeParams() {
   return {
     clientInfo: {
-      name: "t3code_desktop",
+      name: "beppo_desktop",
       title: "Beppo Desktop",
       version: "0.1.0",
     },
@@ -88,6 +88,7 @@ export async function probeCodexAccount(input: {
       return;
     }
     input.signal?.addEventListener("abort", () => fail(new Error("Codex account probe aborted.")));
+    child.on("error", (error) => fail(error));
 
     const writeMessage = (message: unknown) => {
       if (!child.stdin.writable) {

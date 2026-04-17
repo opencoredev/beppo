@@ -23,6 +23,11 @@
       "cache": false,
       "persistent": true
     },
+    "perf": {
+      "dependsOn": ["@t3tools/web#build"],
+      "cache": false,
+      "outputs": []
+    },
     "typecheck": {
       "dependsOn": ["^typecheck"],
       "outputs": [],

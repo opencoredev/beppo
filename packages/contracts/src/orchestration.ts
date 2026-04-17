@@ -17,6 +17,7 @@ import {
 
 export const ORCHESTRATION_WS_METHODS = {
   getSnapshot: "orchestration.getSnapshot",
+  getThreadSnapshot: "orchestration.getThreadSnapshot",
   dispatchCommand: "orchestration.dispatchCommand",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
@@ -57,6 +58,28 @@ export type ClaudeModelSelection = typeof ClaudeModelSelection.Type;
 
 export const ModelSelection = Schema.Union([CodexModelSelection, ClaudeModelSelection]);
 export type ModelSelection = typeof ModelSelection.Type;
+
+export const TextGenerationProviderKind = Schema.Literals([
+  "codex",
+  "claudeAgent",
+  "openaiCompatible",
+]);
+export type TextGenerationProviderKind = typeof TextGenerationProviderKind.Type;
+
+export const OpenAICompatibleTextGenerationModelSelection = Schema.Struct({
+  provider: Schema.Literal("openaiCompatible"),
+  endpointId: TrimmedNonEmptyString,
+  model: TrimmedNonEmptyString,
+});
+export type OpenAICompatibleTextGenerationModelSelection =
+  typeof OpenAICompatibleTextGenerationModelSelection.Type;
+
+export const TextGenerationModelSelection = Schema.Union([
+  CodexModelSelection,
+  ClaudeModelSelection,
+  OpenAICompatibleTextGenerationModelSelection,
+]);
+export type TextGenerationModelSelection = typeof TextGenerationModelSelection.Type;
 
 export const RuntimeMode = Schema.Literals(["approval-required", "full-access"]);
 export type RuntimeMode = typeof RuntimeMode.Type;
@@ -982,10 +1005,23 @@ export const DispatchResult = Schema.Struct({
 });
 export type DispatchResult = typeof DispatchResult.Type;
 
-export const OrchestrationGetSnapshotInput = Schema.Struct({});
+export const OrchestrationSnapshotScope = Schema.Literals(["full", "summary"]);
+export type OrchestrationSnapshotScope = typeof OrchestrationSnapshotScope.Type;
+
+export const OrchestrationGetSnapshotInput = Schema.Struct({
+  scope: Schema.optionalKey(OrchestrationSnapshotScope),
+});
 export type OrchestrationGetSnapshotInput = typeof OrchestrationGetSnapshotInput.Type;
 const OrchestrationGetSnapshotResult = OrchestrationReadModel;
 export type OrchestrationGetSnapshotResult = typeof OrchestrationGetSnapshotResult.Type;
+
+export const OrchestrationGetThreadSnapshotInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type OrchestrationGetThreadSnapshotInput = typeof OrchestrationGetThreadSnapshotInput.Type;
+
+export const OrchestrationGetThreadSnapshotResult = Schema.NullOr(OrchestrationThread);
+export type OrchestrationGetThreadSnapshotResult = typeof OrchestrationGetThreadSnapshotResult.Type;
 
 export const OrchestrationGetTurnDiffInput = TurnCountRange.mapFields(
   Struct.assign({ threadId: ThreadId }),
@@ -1018,6 +1054,10 @@ export const OrchestrationRpcSchemas = {
     input: OrchestrationGetSnapshotInput,
     output: OrchestrationGetSnapshotResult,
   },
+  getThreadSnapshot: {
+    input: OrchestrationGetThreadSnapshotInput,
+    output: OrchestrationGetThreadSnapshotResult,
+  },
   dispatchCommand: {
     input: ClientOrchestrationCommand,
     output: DispatchResult,
@@ -1038,6 +1078,14 @@ export const OrchestrationRpcSchemas = {
 
 export class OrchestrationGetSnapshotError extends Schema.TaggedErrorClass<OrchestrationGetSnapshotError>()(
   "OrchestrationGetSnapshotError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}
+
+export class OrchestrationGetThreadSnapshotError extends Schema.TaggedErrorClass<OrchestrationGetThreadSnapshotError>()(
+  "OrchestrationGetThreadSnapshotError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect),

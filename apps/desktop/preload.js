@@ -108,6 +108,9 @@
     getUpdateState: function () {
       return request("getUpdateState");
     },
+    checkForUpdate: function () {
+      return request("checkForUpdate");
+    },
     downloadUpdate: function () {
       return request("downloadUpdate");
     },
@@ -119,6 +122,11 @@
       return function () {
         updateStateListeners.delete(listener);
       };
+    },
+    microphone: {
+      openSystemSettings: function () {
+        return request("microphone.openSystemSettings");
+      },
     },
   };
 })();

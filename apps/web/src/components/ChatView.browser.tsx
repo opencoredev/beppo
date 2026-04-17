@@ -625,6 +625,9 @@ function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
   if (tag === ORCHESTRATION_WS_METHODS.getSnapshot) {
     return fixture.snapshot;
   }
+  if (tag === ORCHESTRATION_WS_METHODS.getThreadSnapshot) {
+    return fixture.snapshot.threads.find((thread) => thread.id === body.threadId) ?? null;
+  }
   if (tag === WS_METHODS.serverGetConfig) {
     return fixture.serverConfig;
   }

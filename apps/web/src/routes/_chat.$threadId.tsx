@@ -3,7 +3,6 @@ import { createFileRoute, retainSearchParams, useNavigate } from "@tanstack/reac
 import { Suspense, lazy, type ReactNode, useCallback, useEffect, useState } from "react";
 
 import ChatView from "../components/ChatView";
-import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
 import {
   DiffPanelHeaderSkeleton,
   DiffPanelLoadingState,
@@ -17,11 +16,12 @@ import {
   stripDiffSearchParams,
 } from "../diffRouteSearch";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { ensureNativeApi } from "../nativeApi";
 import { useStore } from "../store";
 import { Sheet, SheetPopup } from "../components/ui/sheet";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
 
-const DiffPanel = lazy(() => import("../components/DiffPanel"));
+const LazyDiffPanelContent = lazy(() => import("../components/LazyDiffPanel"));
 const DIFF_INLINE_LAYOUT_MEDIA_QUERY = "(max-width: 1180px)";
 const DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY = "chat_diff_sidebar_width";
 const DIFF_INLINE_DEFAULT_WIDTH = "clamp(28rem,48vw,44rem)";
@@ -64,11 +64,9 @@ const DiffLoadingFallback = (props: { mode: DiffPanelMode }) => {
 
 const LazyDiffPanel = (props: { mode: DiffPanelMode }) => {
   return (
-    <DiffWorkerPoolProvider>
-      <Suspense fallback={<DiffLoadingFallback mode={props.mode} />}>
-        <DiffPanel mode={props.mode} />
-      </Suspense>
-    </DiffWorkerPoolProvider>
+    <Suspense fallback={<DiffLoadingFallback mode={props.mode} />}>
+      <LazyDiffPanelContent mode={props.mode} />
+    </Suspense>
   );
 };
 
@@ -168,6 +166,8 @@ function ChatThreadRouteView() {
   });
   const search = Route.useSearch();
   const threadExists = useStore((store) => store.threads.some((thread) => thread.id === threadId));
+  const threadHydrated = useStore((store) => Boolean(store.hydratedThreadIds[threadId]));
+  const hydrateThreadSnapshot = useStore((store) => store.hydrateThreadSnapshot);
   const draftThreadExists = useComposerDraftStore((store) =>
     Object.hasOwn(store.draftThreadsByThreadId, threadId),
   );
@@ -177,6 +177,7 @@ function ChatThreadRouteView() {
   // TanStack Router keeps active route components mounted across param-only navigations
   // unless remountDeps are configured, so this stays warm across thread switches.
   const [hasOpenedDiff, setHasOpenedDiff] = useState(diffOpen);
+  const [threadHydrationError, setThreadHydrationError] = useState<string | null>(null);
   const closeDiff = useCallback(() => {
     void navigate({
       to: "/$threadId",
@@ -202,6 +203,46 @@ function ChatThreadRouteView() {
   }, [diffOpen]);
 
   useEffect(() => {
+    if (!bootstrapComplete || draftThreadExists || !threadExists || threadHydrated) {
+      setThreadHydrationError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setThreadHydrationError(null);
+
+    void ensureNativeApi()
+      .orchestration.getThreadSnapshot(threadId)
+      .then((thread) => {
+        if (cancelled) {
+          return;
+        }
+        if (thread === null) {
+          setThreadHydrationError("Thread is unavailable.");
+          return;
+        }
+        hydrateThreadSnapshot(thread);
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        setThreadHydrationError(error instanceof Error ? error.message : "Failed to load thread.");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    bootstrapComplete,
+    draftThreadExists,
+    hydrateThreadSnapshot,
+    threadExists,
+    threadHydrated,
+    threadId,
+  ]);
+
+  useEffect(() => {
     if (!bootstrapComplete) {
       return;
     }
@@ -212,8 +253,21 @@ function ChatThreadRouteView() {
     }
   }, [bootstrapComplete, navigate, routeThreadExists, threadId]);
 
+  const shouldWaitForThreadHydration =
+    bootstrapComplete && threadExists && !draftThreadExists && !threadHydrated;
+
   if (!bootstrapComplete || !routeThreadExists) {
     return null;
+  }
+
+  if (shouldWaitForThreadHydration) {
+    return (
+      <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+        <div className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">
+          {threadHydrationError ?? "Loading thread..."}
+        </div>
+      </SidebarInset>
+    );
   }
 
   const shouldRenderDiffContent = diffOpen || hasOpenedDiff;

@@ -1,4 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { APP_HIDDEN_DIR } from "@t3tools/shared/branding";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { assert, describe, it } from "@effect/vitest";
@@ -46,7 +47,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
   });
 
   describe("createDevRunnerEnv", () => {
-    it.effect("defaults T3CODE_HOME to ~/.t3 when not provided", () =>
+    it.effect("defaults T3CODE_HOME to the Beppo home directory when not provided", () =>
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
           mode: "dev",
@@ -63,7 +64,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.T3CODE_HOME, resolve(homedir(), ".t3"));
+        assert.equal(env.T3CODE_HOME, resolve(homedir(), APP_HIDDEN_DIR));
       }),
     );
 
@@ -161,7 +162,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       }),
     );
 
-    it.effect("does not export backend bootstrap env for dev:desktop", () =>
+    it.effect("keeps external backend wiring for dev:desktop", () =>
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
           mode: "dev:desktop",
@@ -189,12 +190,12 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         assert.equal(env.PORT, "5733");
         assert.equal(env.ELECTRON_RENDERER_PORT, "5733");
         assert.equal(env.VITE_DEV_SERVER_URL, "http://localhost:5733");
-        assert.equal(env.T3CODE_PORT, undefined);
+        assert.equal(env.T3CODE_PORT, "4222");
         assert.equal(env.T3CODE_AUTH_TOKEN, undefined);
         assert.equal(env.T3CODE_MODE, undefined);
-        assert.equal(env.T3CODE_NO_BROWSER, undefined);
+        assert.equal(env.T3CODE_NO_BROWSER, "1");
         assert.equal(env.T3CODE_HOST, undefined);
-        assert.equal(env.VITE_WS_URL, undefined);
+        assert.equal(env.VITE_WS_URL, "ws://localhost:4222");
       }),
     );
   });

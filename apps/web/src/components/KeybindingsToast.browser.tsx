@@ -63,6 +63,7 @@ function createBaseServerConfig(): ServerConfig {
       providers: {
         codex: { enabled: true, binaryPath: "", homePath: "", customModels: [] },
         claudeAgent: { enabled: true, binaryPath: "", customModels: [] },
+        openaiCompatible: { endpoints: [] },
       },
     },
   };
@@ -149,6 +150,9 @@ function buildFixture(): TestFixture {
 function resolveWsRpc(tag: string): unknown {
   if (tag === ORCHESTRATION_WS_METHODS.getSnapshot) {
     return fixture.snapshot;
+  }
+  if (tag === ORCHESTRATION_WS_METHODS.getThreadSnapshot) {
+    return fixture.snapshot.threads.find((thread) => thread.id === THREAD_ID) ?? null;
   }
   if (tag === WS_METHODS.serverGetConfig) {
     return fixture.serverConfig;

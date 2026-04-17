@@ -799,7 +799,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       threadId: string,
       terminalId: string,
     ) {
-      const terminated = yield* Effect.try({
+      yield* Effect.try({
         try: () => process.kill("SIGTERM"),
         catch: (cause) =>
           new TerminalProcessSignalError({
@@ -808,38 +808,35 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             signal: "SIGTERM",
           }),
       }).pipe(
-        Effect.as(true),
         Effect.catch((error) =>
-          Effect.logWarning("failed to kill terminal process", {
+          Effect.logWarning("failed to send SIGTERM to terminal process", {
             threadId,
             terminalId,
             signal: "SIGTERM",
             error: error.message,
-          }).pipe(Effect.as(false)),
+          }),
         ),
       );
-      if (!terminated) {
-        yield* Effect.sleep(processKillGraceMs);
+      yield* Effect.sleep(processKillGraceMs);
 
-        yield* Effect.try({
-          try: () => process.kill("SIGKILL"),
-          catch: (cause) =>
-            new TerminalProcessSignalError({
-              message: "Failed to send SIGKILL to terminal process.",
-              cause,
-              signal: "SIGKILL",
-            }),
-        }).pipe(
-          Effect.catch((error) =>
-            Effect.logWarning("failed to force-kill terminal process", {
-              threadId,
-              terminalId,
-              signal: "SIGKILL",
-              error: error.message,
-            }),
-          ),
-        );
-      }
+      yield* Effect.try({
+        try: () => process.kill("SIGKILL"),
+        catch: (cause) =>
+          new TerminalProcessSignalError({
+            message: "Failed to send SIGKILL to terminal process.",
+            cause,
+            signal: "SIGKILL",
+          }),
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("failed to force-kill terminal process", {
+            threadId,
+            terminalId,
+            signal: "SIGKILL",
+            error: error.message,
+          }),
+        ),
+      );
     });
 
     const startKillEscalation = Effect.fn("terminal.startKillEscalation")(function* (
@@ -1085,6 +1082,12 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         ),
       );
     });
+
+    const runningSessionsForState = (state: TerminalManagerState) =>
+      [...state.sessions.values()].filter(
+        (session): session is TerminalSessionState & { pid: number } =>
+          session.status === "running" && Number.isInteger(session.pid),
+      );
 
     const evictInactiveSessionsIfNeeded = Effect.fn("terminal.evictInactiveSessionsIfNeeded")(
       function* () {
@@ -1448,17 +1451,9 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       }
     });
 
-    const pollSubprocessActivity = Effect.fn("terminal.pollSubprocessActivity")(function* () {
-      const state = yield* readManagerState;
-      const runningSessions = [...state.sessions.values()].filter(
-        (session): session is TerminalSessionState & { pid: number } =>
-          session.status === "running" && Number.isInteger(session.pid),
-      );
-
-      if (runningSessions.length === 0) {
-        return;
-      }
-
+    const pollSubprocessActivity = Effect.fn("terminal.pollSubprocessActivity")(function* (
+      runningSessions: ReadonlyArray<TerminalSessionState & { pid: number }>,
+    ) {
       const checkSubprocessActivity = Effect.fn("terminal.checkSubprocessActivity")(function* (
         session: TerminalSessionState & { pid: number },
       ) {
@@ -1512,28 +1507,26 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
         }
       });
 
+      if (runningSessions.length === 0) {
+        return;
+      }
+
+      const concurrency = Math.max(1, Math.min(8, runningSessions.length));
       yield* Effect.forEach(runningSessions, checkSubprocessActivity, {
-        concurrency: "unbounded",
+        concurrency,
         discard: true,
       });
     });
 
-    const hasRunningSessions = readManagerState.pipe(
-      Effect.map((state) =>
-        [...state.sessions.values()].some((session) => session.status === "running"),
-      ),
-    );
-
     yield* Effect.forever(
-      hasRunningSessions.pipe(
-        Effect.flatMap((active) =>
-          active
-            ? pollSubprocessActivity().pipe(
-                Effect.flatMap(() => Effect.sleep(subprocessPollIntervalMs)),
-              )
-            : Effect.sleep(subprocessPollIntervalMs),
-        ),
-      ),
+      Effect.gen(function* () {
+        const state = yield* readManagerState;
+        const runningSessions = runningSessionsForState(state);
+        if (runningSessions.length > 0) {
+          yield* pollSubprocessActivity(runningSessions);
+        }
+        yield* Effect.sleep(subprocessPollIntervalMs);
+      }),
     ).pipe(Effect.forkIn(workerScope));
 
     yield* Effect.addFinalizer(() =>

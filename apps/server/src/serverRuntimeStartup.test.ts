@@ -61,6 +61,7 @@ it.effect("launchStartupHeartbeat does not block the caller while counts are loa
       yield* launchStartupHeartbeat.pipe(
         Effect.provideService(ProjectionSnapshotQuery, {
           getSnapshot: () => Effect.die("unused"),
+          getThreadSnapshot: () => Effect.succeed(Option.none()),
           getCounts: () =>
             Deferred.await(releaseCounts).pipe(
               Effect.as({
