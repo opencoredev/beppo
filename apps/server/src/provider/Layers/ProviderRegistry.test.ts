@@ -128,7 +128,10 @@ function withTempCodexHome(configContent?: string) {
   return Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const tmpDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-test-codex-" });
+    const tmpDir = yield* Effect.acquireRelease(
+      fileSystem.makeTempDirectory({ prefix: "t3-test-codex-" }),
+      (tmpDir) => fileSystem.remove(tmpDir, { recursive: true, force: true }).pipe(Effect.ignore),
+    );
 
     yield* Effect.acquireRelease(
       Effect.sync(() => {

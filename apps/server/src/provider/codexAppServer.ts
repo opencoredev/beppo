@@ -88,6 +88,7 @@ export async function probeCodexAccount(input: {
       return;
     }
     input.signal?.addEventListener("abort", () => fail(new Error("Codex account probe aborted.")));
+    child.on("error", (error) => fail(error));
 
     const writeMessage = (message: unknown) => {
       if (!child.stdin.writable) {
