@@ -799,7 +799,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       threadId: string,
       terminalId: string,
     ) {
-      const terminated = yield* Effect.try({
+      yield* Effect.try({
         try: () => process.kill("SIGTERM"),
         catch: (cause) =>
           new TerminalProcessSignalError({
@@ -808,38 +808,35 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             signal: "SIGTERM",
           }),
       }).pipe(
-        Effect.as(true),
         Effect.catch((error) =>
-          Effect.logWarning("failed to kill terminal process", {
+          Effect.logWarning("failed to send SIGTERM to terminal process", {
             threadId,
             terminalId,
             signal: "SIGTERM",
             error: error.message,
-          }).pipe(Effect.as(false)),
+          }),
         ),
       );
-      if (!terminated) {
-        yield* Effect.sleep(processKillGraceMs);
+      yield* Effect.sleep(processKillGraceMs);
 
-        yield* Effect.try({
-          try: () => process.kill("SIGKILL"),
-          catch: (cause) =>
-            new TerminalProcessSignalError({
-              message: "Failed to send SIGKILL to terminal process.",
-              cause,
-              signal: "SIGKILL",
-            }),
-        }).pipe(
-          Effect.catch((error) =>
-            Effect.logWarning("failed to force-kill terminal process", {
-              threadId,
-              terminalId,
-              signal: "SIGKILL",
-              error: error.message,
-            }),
-          ),
-        );
-      }
+      yield* Effect.try({
+        try: () => process.kill("SIGKILL"),
+        catch: (cause) =>
+          new TerminalProcessSignalError({
+            message: "Failed to send SIGKILL to terminal process.",
+            cause,
+            signal: "SIGKILL",
+          }),
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("failed to force-kill terminal process", {
+            threadId,
+            terminalId,
+            signal: "SIGKILL",
+            error: error.message,
+          }),
+        ),
+      );
     });
 
     const startKillEscalation = Effect.fn("terminal.startKillEscalation")(function* (
