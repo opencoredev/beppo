@@ -13,6 +13,7 @@ import { query as claudeQuery } from "@anthropic-ai/claude-agent-sdk";
 
 import {
   buildServerProvider,
+  buildPendingServerProvider,
   DEFAULT_TIMEOUT_MS,
   detailFromResult,
   extractAuthBoolean,
@@ -644,6 +645,15 @@ export const ClaudeProviderLive = Layer.effect(
         Stream.map((settings) => settings.providers.claudeAgent),
       ),
       haveSettingsChanged: (previous, next) => !Equal.equals(previous, next),
+      buildInitialSnapshot: (settings) =>
+        buildPendingServerProvider({
+          provider: PROVIDER,
+          enabled: settings.enabled,
+          checkedAt: new Date().toISOString(),
+          models: providerModelsFromSettings(BUILT_IN_MODELS, PROVIDER, settings.customModels),
+          disabledMessage: "Claude is disabled in Beppo settings.",
+          checkingMessage: "Checking Claude status…",
+        }),
       checkProvider,
     });
   }),

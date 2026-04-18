@@ -24,6 +24,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   buildServerProvider,
+  buildPendingServerProvider,
   DEFAULT_TIMEOUT_MS,
   detailFromResult,
   extractAuthBoolean,
@@ -890,6 +891,15 @@ export const CodexProviderLive = Layer.effect(
         Stream.map((settings) => settings.providers.codex),
       ),
       haveSettingsChanged: (previous, next) => !Equal.equals(previous, next),
+      buildInitialSnapshot: (settings) =>
+        buildPendingServerProvider({
+          provider: PROVIDER,
+          enabled: settings.enabled,
+          checkedAt: new Date().toISOString(),
+          models: providerModelsFromSettings(BUILT_IN_MODELS, PROVIDER, settings.customModels),
+          disabledMessage: "Codex is disabled in Beppo settings.",
+          checkingMessage: "Checking Codex status…",
+        }),
       checkProvider,
     });
   }),
