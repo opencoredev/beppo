@@ -164,11 +164,20 @@ function getProviderSummary(provider: ServerProvider | undefined) {
       detail: "Waiting for the server to report installation and authentication details.",
     };
   }
+  const normalizedMessage = provider.message?.toLowerCase() ?? "";
+  const isPendingCheck =
+    provider.enabled && provider.status === "warning" && normalizedMessage.startsWith("checking ");
   if (!provider.enabled) {
     return {
       headline: "Disabled",
       detail:
         provider.message ?? "This provider is installed but disabled for new sessions in Beppo.",
+    };
+  }
+  if (isPendingCheck) {
+    return {
+      headline: "Checking provider status",
+      detail: provider.message ?? "Waiting for the server to finish the first provider probe.",
     };
   }
   if (!provider.installed) {

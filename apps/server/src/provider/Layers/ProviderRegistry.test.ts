@@ -557,7 +557,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             const initial = yield* registry.getProviders;
             assert.strictEqual(
               initial.find((status) => status.provider === "codex")?.status,
-              "ready",
+              "warning",
+            );
+            assert.strictEqual(
+              initial.find((status) => status.provider === "codex")?.installed,
+              false,
             );
 
             yield* serverSettings.updateSettings({

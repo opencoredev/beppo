@@ -11,6 +11,7 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   readonly getSettings: Effect.Effect<Settings>;
   readonly streamSettings: Stream.Stream<Settings>;
   readonly haveSettingsChanged: (previous: Settings, next: Settings) => boolean;
+  readonly buildInitialSnapshot: (settings: Settings) => ServerProvider;
   readonly checkProvider: Effect.Effect<ServerProvider, ServerSettingsError>;
   readonly refreshInterval?: Duration.Input;
 }): Effect.fn.Return<ServerProviderShape, ServerSettingsError, Scope.Scope> {
@@ -20,7 +21,10 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     PubSub.shutdown,
   );
   const initialSettings = yield* input.getSettings;
-  const initialSnapshot = yield* input.checkProvider;
+  // This placeholder snapshot is stamped at construction time. Once the
+  // background probe finishes, it overwrites `checkedAt` with the real probe
+  // completion timestamp.
+  const initialSnapshot = input.buildInitialSnapshot(initialSettings);
   const snapshotRef = yield* Ref.make(initialSnapshot);
   const settingsRef = yield* Ref.make(initialSettings);
 
@@ -60,12 +64,12 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     ),
   ).pipe(Effect.forkScoped);
 
+  // Do the first real provider probe in the background so server startup and
+  // route mounting are not blocked on CLI health checks.
+  yield* refreshSnapshot().pipe(Effect.ignoreCause({ log: true }), Effect.forkScoped);
+
   return {
-    getSnapshot: input.getSettings.pipe(
-      Effect.flatMap(applySnapshot),
-      Effect.tapError(Effect.logError),
-      Effect.orDie,
-    ),
+    getSnapshot: Ref.get(snapshotRef),
     refresh: refreshSnapshot().pipe(Effect.tapError(Effect.logError), Effect.orDie),
     get streamChanges() {
       return Stream.fromPubSub(changesPubSub);

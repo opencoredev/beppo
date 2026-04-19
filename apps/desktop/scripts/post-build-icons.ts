@@ -8,6 +8,7 @@ const serverNodeModulesDir = resolve(import.meta.dir, "../../server/node_modules
 const serverRuntimeDependencies = ["node-pty"];
 const legacyPreloadBundleDir = resolve(import.meta.dir, "../dist-electron");
 const legacyPreloadBundlePath = join(legacyPreloadBundleDir, "preload.js");
+const sourcePreloadBundlePath = resolve(import.meta.dir, "../preload.js");
 
 if (!buildDir) {
   process.exit(0);
@@ -153,6 +154,11 @@ const bundledPreloadPath = findBundledPreloadPath(resolvedBuildDir);
 if (bundledPreloadPath) {
   mkdirSync(legacyPreloadBundleDir, { recursive: true });
   cpSync(bundledPreloadPath, legacyPreloadBundlePath, { dereference: true, force: true });
+} else if (existsSync(sourcePreloadBundlePath)) {
+  // CI still verifies this legacy compatibility copy even when Electrobun's
+  // build layout does not expose the bundled preload in a stable location.
+  mkdirSync(legacyPreloadBundleDir, { recursive: true });
+  cpSync(sourcePreloadBundlePath, legacyPreloadBundlePath, { dereference: true, force: true });
 }
 
 if (targetOs !== "macos") {
