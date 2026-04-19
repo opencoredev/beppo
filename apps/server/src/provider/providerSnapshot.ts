@@ -211,7 +211,9 @@ export function buildPendingServerProvider(input: {
     ...(input.runtimeSupport !== undefined ? { runtimeSupport: input.runtimeSupport } : {}),
     probe: input.enabled
       ? {
-          installed: true,
+          // Pending snapshots intentionally keep install state "unknown" until
+          // the first real CLI probe completes.
+          installed: false,
           version: null,
           status: "warning",
           auth: { status: "unknown" },

@@ -21,6 +21,9 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     PubSub.shutdown,
   );
   const initialSettings = yield* input.getSettings;
+  // This placeholder snapshot is stamped at construction time. Once the
+  // background probe finishes, it overwrites `checkedAt` with the real probe
+  // completion timestamp.
   const initialSnapshot = input.buildInitialSnapshot(initialSettings);
   const snapshotRef = yield* Ref.make(initialSnapshot);
   const settingsRef = yield* Ref.make(initialSettings);

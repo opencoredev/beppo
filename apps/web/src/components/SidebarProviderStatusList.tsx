@@ -50,12 +50,21 @@ function getProviderStatusDotClass(provider: ServerProvider): string {
   return PROVIDER_STATUS_DOT_CLASS[provider.status];
 }
 
+function isPendingProviderCheck(provider: ServerProvider): boolean {
+  const message = provider.message?.toLowerCase() ?? "";
+  return provider.enabled && provider.status === "warning" && message.startsWith("checking ");
+}
+
 function getProviderHeadline(provider: ServerProvider): {
   icon: typeof ShieldCheckIcon;
   label: string;
 } {
   if (!provider.enabled) {
     return { icon: ShieldOffIcon, label: "Disabled" };
+  }
+
+  if (isPendingProviderCheck(provider)) {
+    return { icon: ShieldAlertIcon, label: "Checking…" };
   }
 
   if (!provider.installed) {
