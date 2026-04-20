@@ -19,9 +19,13 @@ describe("createStartupRedirectWindowUrl", () => {
 
     expect(html).toContain("Starting Beppo");
     expect(html).toContain("Waiting for the local server to respond");
+    expect(html).toContain("This should only take a moment.");
+    expect(html).toContain("color-scheme: dark;");
     expect(html).toContain(`const targetUrl = ${JSON.stringify(targetUrl)};`);
     expect(html).toContain(`const backendWsUrl = ${JSON.stringify(backendWsUrl)};`);
+    expect(html).toContain("const timeoutMs = 15000;");
     expect(html).toContain("new WebSocket(backendWsUrl)");
     expect(html).toContain("window.location.replace(targetUrl)");
+    expect(html).toContain("Beppo is taking longer than expected to start.");
   });
 });

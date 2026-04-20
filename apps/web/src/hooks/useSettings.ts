@@ -134,8 +134,11 @@ export async function updateUnifiedSettings(
   }
 
   const serverConfig = deps.getServerConfig();
+  const previousOptimisticServerSettings = deps.getOptimisticServerSettings();
+  const shouldClearOptimisticServerSettingsOnFailure =
+    serverConfig === null && previousOptimisticServerSettings === null;
   const previousServerSettings =
-    serverConfig?.settings ?? deps.getOptimisticServerSettings() ?? DEFAULT_SERVER_SETTINGS;
+    serverConfig?.settings ?? previousOptimisticServerSettings ?? DEFAULT_SERVER_SETTINGS;
   const nextServerSettings = applyServerSettingsPatchPreview(previousServerSettings, serverPatch);
 
   if (serverConfig) {
@@ -154,7 +157,7 @@ export async function updateUnifiedSettings(
   } catch (error) {
     if (deps.getServerConfig()) {
       deps.applyServerSettings(previousServerSettings);
-    } else if (previousServerSettings === DEFAULT_SERVER_SETTINGS) {
+    } else if (shouldClearOptimisticServerSettingsOnFailure) {
       deps.setOptimisticServerSettings(null);
     } else {
       deps.setOptimisticServerSettings(previousServerSettings);

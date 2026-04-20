@@ -160,4 +160,36 @@ describe("updateUnifiedSettings", () => {
       }),
     );
   });
+
+  it("clears the optimistic snapshot when a cold-start save fails before the first server snapshot", async () => {
+    const setClientSettings = vi.fn();
+    const setOptimisticServerSettings = vi.fn();
+    const applyServerSettings = vi.fn();
+    const updateServerSettings = vi.fn().mockRejectedValue(new Error("RPC failed"));
+    const addToast = vi.fn();
+
+    await updateUnifiedSettings(
+      {
+        enableAssistantStreaming: true,
+      },
+      {
+        getServerConfig: () => null,
+        getOptimisticServerSettings: () => null,
+        setOptimisticServerSettings,
+        applyServerSettings,
+        setClientSettings,
+        updateServerSettings,
+        addToast,
+      },
+    );
+
+    expect(setOptimisticServerSettings).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        enableAssistantStreaming: true,
+      }),
+    );
+    expect(setOptimisticServerSettings).toHaveBeenNthCalledWith(2, null);
+    expect(applyServerSettings).not.toHaveBeenCalled();
+  });
 });
