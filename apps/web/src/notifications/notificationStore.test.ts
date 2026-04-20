@@ -4,11 +4,14 @@ import { NOTIFICATION_ENABLED_STORAGE_KEY } from "./notificationStore";
 
 function createWindowStub() {
   const storage = new Map<string, string>();
+  const notificationStub = {
+    permission: "granted" as NotificationPermission,
+    requestPermission: vi.fn(async () => "granted" as NotificationPermission),
+    prototype: {},
+  } as unknown as typeof Notification;
 
   return {
-    Notification: {
-      permission: "granted" as NotificationPermission,
-    },
+    Notification: notificationStub,
     localStorage: {
       getItem: (key: string) => storage.get(key) ?? null,
       setItem: (key: string, value: string) => {
@@ -86,17 +89,20 @@ describe("useNotificationStore", () => {
         removeItem: (key: string) => void;
         clear: () => void;
       };
-      Notification: {
-        permission: NotificationPermission;
-      };
+      Notification: typeof Notification;
     };
 
     windowStub.localStorage.setItem(
       NOTIFICATION_ENABLED_STORAGE_KEY,
       JSON.stringify({ enabled: true }),
     );
-    vi.stubGlobal("Notification", { permission: "denied" });
-    windowStub.Notification = { permission: "denied" };
+    const deniedNotification = {
+      permission: "denied" as NotificationPermission,
+      requestPermission: vi.fn(async () => "denied" as NotificationPermission),
+      prototype: {},
+    } as unknown as typeof Notification;
+    vi.stubGlobal("Notification", deniedNotification);
+    windowStub.Notification = deniedNotification;
 
     const { useNotificationStore } = await import("./notificationStore");
 
