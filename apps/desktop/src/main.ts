@@ -33,6 +33,7 @@ import { resolveWindowsWslHomePathSync } from "@t3tools/shared/wsl";
 
 import { showDesktopConfirmDialog } from "./confirmDialog";
 import { fixPath } from "./fixPath";
+import { createStartupRedirectWindowUrl } from "./startupWindow";
 import {
   createInitialDesktopUpdateState,
   reduceDesktopUpdateStateOnCheckFailure,
@@ -1028,6 +1029,10 @@ function configureContextMenuListener(): void {
 
 function createWindow(): DesktopWindow {
   const renderer = useCefRenderer ? "cef" : "native";
+  const targetUrl = resolveWindowUrl();
+  const url = useExternalDevBackend
+    ? targetUrl
+    : createStartupRedirectWindowUrl(targetUrl, backendWsUrl);
   const window = new BrowserWindow({
     title: APP_DISPLAY_NAME,
     frame: {
@@ -1039,11 +1044,13 @@ function createWindow(): DesktopWindow {
     renderer,
     preload: resolvePreloadPath(),
     titleBarStyle: renderer === "native" && !isWslRuntime ? "hiddenInset" : "default",
-    url: resolveWindowUrl(),
+    url,
     sandbox: false,
   });
 
-  writeDesktopLog(`created window id=${window.id} renderer=${renderer} url=${resolveWindowUrl()}`);
+  writeDesktopLog(
+    `created window id=${window.id} renderer=${renderer} launch=${useExternalDevBackend ? "direct" : "splash"} target=${targetUrl}`,
+  );
 
   // Electrobun windows may not become visible automatically on macOS dev launches
   // when started from a terminal, so explicitly show/focus the first window.
@@ -1118,7 +1125,6 @@ async function bootstrap(): Promise<void> {
       `bootstrap resolved websocket url=${backendWsUrl} authToken=${maskSecret(backendAuthToken)}`,
     );
     startBackend();
-    await waitForHttpUrl(`http://127.0.0.1:${backendPort}/`, 15_000);
   }
 
   mainWindow = createWindow();
