@@ -6,6 +6,9 @@ function createWindowStub() {
   const storage = new Map<string, string>();
 
   return {
+    Notification: {
+      permission: "granted" as NotificationPermission,
+    },
     localStorage: {
       getItem: (key: string) => storage.get(key) ?? null,
       setItem: (key: string, value: string) => {
@@ -24,7 +27,9 @@ function createWindowStub() {
 describe("useNotificationStore", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.stubGlobal("window", createWindowStub());
+    const windowStub = createWindowStub();
+    vi.stubGlobal("window", windowStub);
+    vi.stubGlobal("Notification", windowStub.Notification);
   });
 
   afterEach(() => {
@@ -70,6 +75,32 @@ describe("useNotificationStore", () => {
 
     const { useNotificationStore } = await import("./notificationStore");
 
+    expect(useNotificationStore.getState().enabled).toBe(false);
+  });
+
+  it("disables notifications on reload when permission was revoked externally", async () => {
+    const windowStub = window as typeof globalThis.window & {
+      localStorage: {
+        getItem: (key: string) => string | null;
+        setItem: (key: string, value: string) => void;
+        removeItem: (key: string) => void;
+        clear: () => void;
+      };
+      Notification: {
+        permission: NotificationPermission;
+      };
+    };
+
+    windowStub.localStorage.setItem(
+      NOTIFICATION_ENABLED_STORAGE_KEY,
+      JSON.stringify({ enabled: true }),
+    );
+    vi.stubGlobal("Notification", { permission: "denied" });
+    windowStub.Notification = { permission: "denied" };
+
+    const { useNotificationStore } = await import("./notificationStore");
+
+    expect(useNotificationStore.getState().permission).toBe("denied");
     expect(useNotificationStore.getState().enabled).toBe(false);
   });
 });

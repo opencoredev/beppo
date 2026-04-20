@@ -59,7 +59,7 @@ function persistEnabledState(enabled: boolean) {
 
 export const useNotificationStore = create<NotificationStore>((set) => ({
   permission: getInitialPermission(),
-  enabled: readInitialEnabledState(),
+  enabled: readInitialEnabledState() && getInitialPermission() === "granted",
   lastActivityByThread: {},
 
   setEnabled: (enabled) => {
