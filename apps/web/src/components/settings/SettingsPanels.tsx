@@ -64,7 +64,9 @@ import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { useNotificationStore } from "../../notifications/notificationStore";
+import { refreshProvidersAndApply } from "./settingsPanels.logic";
 import {
+  applyProvidersUpdated,
   useServerAvailableEditors,
   useServerKeybindingsConfigPath,
   useServerProviders,
@@ -598,19 +600,22 @@ export function GeneralSettingsPanel() {
   const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
   const refreshingRef = useRef(false);
   const modelListRefs = useRef<Partial<Record<ProviderKind, HTMLDivElement | null>>>({});
-  const refreshProviders = useCallback(() => {
+  const refreshProviders = useCallback(async () => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     setIsRefreshingProviders(true);
-    void ensureNativeApi()
-      .server.refreshProviders()
-      .catch((error: unknown) => {
-        console.warn("Failed to refresh providers", error);
-      })
-      .finally(() => {
-        refreshingRef.current = false;
-        setIsRefreshingProviders(false);
+    try {
+      await refreshProvidersAndApply({
+        refreshProviders: () => ensureNativeApi().server.refreshProviders(),
+        applyProviders: applyProvidersUpdated,
+        addToast: (input) => {
+          toastManager.add(input);
+        },
       });
+    } finally {
+      refreshingRef.current = false;
+      setIsRefreshingProviders(false);
+    }
   }, []);
 
   const keybindingsConfigPath = useServerKeybindingsConfigPath();
