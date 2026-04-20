@@ -80,6 +80,7 @@ import { useHandleNewThread } from "../hooks/useHandleNewThread";
 
 import { useThreadActions } from "../hooks/useThreadActions";
 import { toastManager } from "./ui/toast";
+import { pickFolderWithFeedback } from "./folderPicker";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import {
@@ -978,21 +979,27 @@ export default function Sidebar() {
   const canAddProject = newCwd.trim().length > 0 && !isAddingProject;
 
   const handlePickFolder = async () => {
-    const api = readNativeApi();
-    if (!api || isPickingFolder) return;
+    if (isPickingFolder) return;
     setIsPickingFolder(true);
-    let pickedPath: string | null = null;
     try {
-      pickedPath = await api.dialogs.pickFolder();
-    } catch {
-      // Ignore picker failures and leave the current thread selection unchanged.
+      const pickedPath = await pickFolderWithFeedback({
+        api: readNativeApi(),
+        onError: ({ title, description }) => {
+          toastManager.add({
+            type: "error",
+            title,
+            description,
+          });
+        },
+      });
+      if (pickedPath) {
+        await addProjectFromPath(pickedPath);
+      } else {
+        addProjectInputRef.current?.focus();
+      }
+    } finally {
+      setIsPickingFolder(false);
     }
-    if (pickedPath) {
-      await addProjectFromPath(pickedPath);
-    } else {
-      addProjectInputRef.current?.focus();
-    }
-    setIsPickingFolder(false);
   };
 
   const handleStartAddProject = () => {
