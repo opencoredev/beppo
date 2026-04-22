@@ -1,11 +1,12 @@
-import { describe, expect, it } from "vitest";
 import { EventId, type OrchestrationThreadActivity, TurnId } from "@t3tools/contracts";
+import { describe, expect, it } from "vitest";
 
 import {
   deriveLatestActivityRateLimitSnapshot,
   deriveLatestProviderRateLimitSnapshots,
   deriveVisibleRateLimitRows,
   formatRateLimitValue,
+  pickLatestProviderRateLimitSnapshot,
 } from "./rateLimits";
 
 function makeActivity(
@@ -14,12 +15,12 @@ function makeActivity(
   createdAt = "2099-04-08T18:00:00.000Z",
 ): OrchestrationThreadActivity {
   return {
-    id: id as EventId,
+    id: EventId.makeUnsafe(id),
     tone: "info",
     kind: "account.rate-limits.updated",
     summary: "rate limits",
     payload,
-    turnId: "turn-1" as TurnId,
+    turnId: TurnId.makeUnsafe("turn-1"),
     createdAt,
   };
 }
@@ -186,5 +187,59 @@ describe("rateLimits helpers", () => {
         },
       ),
     ).toBe("80%");
+  });
+
+  it("prefers the freshest provider snapshot source", () => {
+    const providerSnapshot = {
+      provider: "codex" as const,
+      updatedAt: "2099-04-08T18:00:00.000Z",
+      entries:
+        deriveLatestActivityRateLimitSnapshot([
+          makeActivity("provider-activity", {
+            rateLimits: {
+              primary: {
+                usedPercent: 25,
+                windowDurationMins: 300,
+              },
+            },
+          }),
+        ])?.entries ?? [],
+    };
+    const newerThreadSnapshot = {
+      provider: "codex" as const,
+      updatedAt: "2099-04-08T19:00:00.000Z",
+      entries:
+        deriveLatestActivityRateLimitSnapshot([
+          makeActivity("thread-activity", {
+            rateLimits: {
+              primary: {
+                usedPercent: 10,
+                windowDurationMins: 300,
+              },
+            },
+          }),
+        ])?.entries ?? [],
+    };
+
+    expect(
+      formatRateLimitValue(
+        pickLatestProviderRateLimitSnapshot([providerSnapshot, newerThreadSnapshot])
+          ?.entries[0] ?? {
+          remaining: null,
+          limit: null,
+          remainingPercent: null,
+        },
+      ),
+    ).toBe("90%");
+    expect(
+      formatRateLimitValue(
+        pickLatestProviderRateLimitSnapshot([newerThreadSnapshot, providerSnapshot])
+          ?.entries[0] ?? {
+          remaining: null,
+          limit: null,
+          remainingPercent: null,
+        },
+      ),
+    ).toBe("90%");
   });
 });

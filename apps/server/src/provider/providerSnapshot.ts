@@ -199,6 +199,43 @@ export function buildServerProvider(input: {
   };
 }
 
+export function buildPendingServerProvider(input: {
+  provider: ServerProvider["provider"];
+  enabled: boolean;
+  checkedAt: string;
+  models: ReadonlyArray<ServerProviderModel>;
+  disabledMessage?: string;
+  checkingMessage?: string;
+  experimental?: boolean;
+  runtimeSupport?: ServerProviderRuntimeSupport;
+}): ServerProvider {
+  return buildServerProvider({
+    provider: input.provider,
+    enabled: input.enabled,
+    checkedAt: input.checkedAt,
+    models: input.models,
+    ...(input.experimental !== undefined ? { experimental: input.experimental } : {}),
+    ...(input.runtimeSupport !== undefined ? { runtimeSupport: input.runtimeSupport } : {}),
+    probe: input.enabled
+      ? {
+          // Pending snapshots intentionally keep install state "unknown" until
+          // the first real CLI probe completes.
+          installed: false,
+          version: null,
+          status: "warning",
+          auth: { status: "unknown" },
+          message: input.checkingMessage ?? "Checking provider status…",
+        }
+      : {
+          installed: false,
+          version: null,
+          status: "warning",
+          auth: { status: "unknown" },
+          message: input.disabledMessage ?? "This provider is disabled in Beppo settings.",
+        },
+  });
+}
+
 export function buildExperimentalAcpServerProvider(input: {
   provider: Extract<ServerProvider["provider"], "githubCopilot" | "cursor">;
   enabled: boolean;

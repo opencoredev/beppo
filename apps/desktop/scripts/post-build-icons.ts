@@ -6,6 +6,9 @@ const targetOs = process.env.ELECTROBUN_OS?.trim();
 const rootBunStoreDir = resolve(import.meta.dir, "../../../node_modules/.bun");
 const serverNodeModulesDir = resolve(import.meta.dir, "../../server/node_modules");
 const serverRuntimeDependencies = ["node-pty"];
+const legacyPreloadBundleDir = resolve(import.meta.dir, "../dist-electron");
+const legacyPreloadBundlePath = join(legacyPreloadBundleDir, "preload.js");
+const sourcePreloadBundlePath = resolve(import.meta.dir, "../preload.js");
 
 if (!buildDir) {
   process.exit(0);
@@ -121,8 +124,41 @@ function findBundledAppRoots(searchDir: string): string[] {
   return appRoots;
 }
 
-for (const appRootDir of findBundledAppRoots(resolvedBuildDir)) {
+function findBundledPreloadPath(searchDir: string): string | null {
+  const directPreloadPath = join(searchDir, "preload.js");
+  if (existsSync(directPreloadPath)) {
+    return directPreloadPath;
+  }
+
+  for (const entry of readdirSync(searchDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const nested = findBundledPreloadPath(join(searchDir, entry.name));
+    if (nested) {
+      return nested;
+    }
+  }
+
+  return null;
+}
+
+const bundledAppRoots = findBundledAppRoots(resolvedBuildDir);
+
+for (const appRootDir of bundledAppRoots) {
   vendorServerRuntime(appRootDir);
+}
+
+const bundledPreloadPath = findBundledPreloadPath(resolvedBuildDir);
+
+if (bundledPreloadPath) {
+  mkdirSync(legacyPreloadBundleDir, { recursive: true });
+  cpSync(bundledPreloadPath, legacyPreloadBundlePath, { dereference: true, force: true });
+} else if (existsSync(sourcePreloadBundlePath)) {
+  // CI still verifies this legacy compatibility copy even when Electrobun's
+  // build layout does not expose the bundled preload in a stable location.
+  mkdirSync(legacyPreloadBundleDir, { recursive: true });
+  cpSync(sourcePreloadBundlePath, legacyPreloadBundlePath, { dereference: true, force: true });
 }
 
 if (targetOs !== "macos") {

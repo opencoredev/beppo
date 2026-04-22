@@ -11,15 +11,20 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import {
+  DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   PROVIDER_DISPLAY_NAMES,
   type DesktopUpdateChannel,
   type ScopedThreadRef,
   type ProviderKind,
   type ServerProvider,
   type ServerProviderModel,
+  type TextGenerationModelSelection,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import {
+  DEFAULT_UNIFIED_SETTINGS,
+  type OpenAICompatibleEndpointSettings,
+} from "@t3tools/contracts/settings";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { Equal } from "effect";
 import { APP_VERSION } from "../../branding";
@@ -54,7 +59,7 @@ import {
   useStore,
 } from "../../store";
 import { formatRelativeTime, formatRelativeTimeLabel } from "../../timestampFormat";
-import { cn } from "../../lib/utils";
+import { cn, randomUUID } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent } from "../ui/collapsible";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
@@ -98,6 +103,29 @@ const TIMESTAMP_FORMAT_LABELS = {
   "12-hour": "12-hour",
   "24-hour": "24-hour",
 } as const;
+
+const CUSTOM_TEXT_ENDPOINT_PREFIX = "openaiCompatible:";
+
+function createOpenAICompatibleEndpoint(existingCount: number): OpenAICompatibleEndpointSettings {
+  return {
+    id: `openai-compatible-${randomUUID()}`,
+    label: `Custom endpoint ${existingCount + 1}`,
+    enabled: true,
+    baseUrl: "https://api.openai.com/v1",
+    apiKey: "",
+    apiKeyEnvVar: "",
+    model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.openaiCompatible,
+    wireApi: "chat-completions",
+  };
+}
+
+function getTextGenerationTargetValue(selection: TextGenerationModelSelection): string {
+  if (selection.provider === "openaiCompatible") {
+    return `${CUSTOM_TEXT_ENDPOINT_PREFIX}${selection.endpointId}`;
+  }
+
+  return selection.provider;
+}
 
 type InstallProviderSettings = {
   provider: ProviderKind;
@@ -149,11 +177,20 @@ function getProviderSummary(provider: ServerProvider | undefined) {
       detail: "Waiting for the server to report installation and authentication details.",
     };
   }
+  const normalizedMessage = provider.message?.toLowerCase() ?? "";
+  const isPendingCheck =
+    provider.enabled && provider.status === "warning" && normalizedMessage.startsWith("checking ");
   if (!provider.enabled) {
     return {
       headline: "Disabled",
       detail:
-        provider.message ?? "This provider is installed but disabled for new sessions in T3 Code.",
+        provider.message ?? "This provider is installed but disabled for new sessions in Beppo.",
+    };
+  }
+  if (isPendingCheck) {
+    return {
+      headline: "Checking provider status",
+      detail: provider.message ?? "Waiting for the server to finish the first provider probe.",
     };
   }
   if (!provider.installed) {
@@ -423,6 +460,10 @@ export function useSettingsRestore(onRestored?: () => void) {
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
+  const areCustomTextEndpointsDirty = !Equal.equals(
+    settings.providers.openaiCompatible,
+    DEFAULT_UNIFIED_SETTINGS.providers.openaiCompatible,
+  );
   const areProviderSettingsDirty = PROVIDER_SETTINGS.some((providerSettings) => {
     const currentSettings = settings.providers[providerSettings.provider];
     const defaultSettings = DEFAULT_UNIFIED_SETTINGS.providers[providerSettings.provider];
@@ -454,9 +495,11 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["Delete confirmation"]
         : []),
       ...(isGitWritingModelDirty ? ["Git writing model"] : []),
+      ...(areCustomTextEndpointsDirty ? ["Custom text endpoints"] : []),
       ...(areProviderSettingsDirty ? ["Providers"] : []),
     ],
     [
+      areCustomTextEndpointsDirty,
       areProviderSettingsDirty,
       isGitWritingModelDirty,
       settings.confirmThreadArchive,
@@ -564,12 +607,13 @@ export function GeneralSettingsPanel() {
   const textGenModel = textGenerationModelSelection.model;
   const textGenModelOptions =
     "options" in textGenerationModelSelection ? textGenerationModelSelection.options : undefined;
-  const openAICompatibleEndpoints = settings.providers.openaiCompatible.endpoints.filter(
+  const openAICompatibleEndpoints = settings.providers.openaiCompatible.endpoints;
+  const enabledOpenAICompatibleEndpoints = openAICompatibleEndpoints.filter(
     (endpoint) => endpoint.enabled,
   );
   const selectedOpenAICompatibleEndpoint =
     textGenProvider === "openaiCompatible"
-      ? (openAICompatibleEndpoints.find(
+      ? (enabledOpenAICompatibleEndpoints.find(
           (endpoint) => endpoint.id === textGenerationModelSelection.endpointId,
         ) ?? null)
       : null;
@@ -582,6 +626,10 @@ export function GeneralSettingsPanel() {
   const isGitWritingModelDirty = !Equal.equals(
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
+  );
+  const areCustomTextEndpointsDirty = !Equal.equals(
+    settings.providers.openaiCompatible,
+    DEFAULT_UNIFIED_SETTINGS.providers.openaiCompatible,
   );
 
   const openInPreferredEditor = useCallback(
@@ -602,7 +650,7 @@ export function GeneralSettingsPanel() {
 
       void ensureLocalApi()
         .shell.openInEditor(path, editor)
-        .catch((error) => {
+        .catch((error: unknown) => {
           setOpenPathErrorByTarget((existing) => ({
             ...existing,
             [target]: error instanceof Error ? error.message : failureMessage,
@@ -719,6 +767,106 @@ export function GeneralSettingsPanel() {
     [settings, updateSettings],
   );
 
+  const updateOpenAICompatibleEndpoints = useCallback(
+    (nextEndpoints: ReadonlyArray<OpenAICompatibleEndpointSettings>) => {
+      const nextSettings = {
+        ...settings,
+        providers: {
+          ...settings.providers,
+          openaiCompatible: {
+            endpoints: [...nextEndpoints],
+          },
+        },
+      };
+
+      updateSettings({
+        providers: nextSettings.providers,
+        textGenerationModelSelection: resolveAppModelSelectionState(nextSettings, serverProviders),
+      });
+    },
+    [serverProviders, settings, updateSettings],
+  );
+
+  const addOpenAICompatibleEndpoint = useCallback(() => {
+    updateOpenAICompatibleEndpoints([
+      ...openAICompatibleEndpoints,
+      createOpenAICompatibleEndpoint(openAICompatibleEndpoints.length),
+    ]);
+  }, [openAICompatibleEndpoints, updateOpenAICompatibleEndpoints]);
+
+  const updateOpenAICompatibleEndpoint = useCallback(
+    (endpointId: string, patch: Partial<OpenAICompatibleEndpointSettings>) => {
+      updateOpenAICompatibleEndpoints(
+        openAICompatibleEndpoints.map((endpoint) =>
+          endpoint.id === endpointId ? { ...endpoint, ...patch } : endpoint,
+        ),
+      );
+    },
+    [openAICompatibleEndpoints, updateOpenAICompatibleEndpoints],
+  );
+
+  const removeOpenAICompatibleEndpoint = useCallback(
+    (endpointId: string) => {
+      updateOpenAICompatibleEndpoints(
+        openAICompatibleEndpoints.filter((endpoint) => endpoint.id !== endpointId),
+      );
+    },
+    [openAICompatibleEndpoints, updateOpenAICompatibleEndpoints],
+  );
+
+  const handleTextGenerationTargetChange = useCallback(
+    (value: string) => {
+      if (value === "codex" || value === "claudeAgent") {
+        updateSettings({
+          textGenerationModelSelection: resolveAppModelSelectionState(
+            {
+              ...settings,
+              textGenerationModelSelection: {
+                provider: value,
+                model:
+                  textGenProvider === value
+                    ? textGenModel
+                    : value === "codex"
+                      ? DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex
+                      : DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.claudeAgent,
+              },
+            },
+            serverProviders,
+          ),
+        });
+        return;
+      }
+
+      if (!value.startsWith(CUSTOM_TEXT_ENDPOINT_PREFIX)) {
+        return;
+      }
+
+      const endpointId = value.slice(CUSTOM_TEXT_ENDPOINT_PREFIX.length);
+      const endpoint = enabledOpenAICompatibleEndpoints.find(
+        (candidate) => candidate.id === endpointId,
+      );
+      if (!endpoint) {
+        return;
+      }
+
+      updateSettings({
+        textGenerationModelSelection: {
+          provider: "openaiCompatible",
+          endpointId: endpoint.id,
+          model: endpoint.model,
+        },
+      });
+    },
+    [
+      enabledOpenAICompatibleEndpoints,
+      serverProviders,
+      settings,
+      textGenModel,
+      textGenProvider,
+      updateSettings,
+    ],
+  );
+
   const providerCards = PROVIDER_SETTINGS.map((providerSettings) => {
     const liveProvider = serverProviders.find(
       (candidate) => candidate.provider === providerSettings.provider,
@@ -768,7 +916,7 @@ export function GeneralSettingsPanel() {
       <SettingsSection title="General">
         <SettingsRow
           title="Theme"
-          description="Choose how T3 Code looks across the app."
+          description="Choose how Beppo looks across the app."
           resetAction={
             theme !== "system" ? (
               <SettingResetButton label="theme" onClick={() => setTheme("system")} />
@@ -1015,7 +1163,7 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           title="Text generation model"
-          description="Configure the model used for generated commit messages, PR titles, and similar Git text."
+          description="Choose what Beppo uses for commit messages, PR text, branch names, and thread titles."
           resetAction={
             isGitWritingModelDirty ? (
               <SettingResetButton
@@ -1030,66 +1178,62 @@ export function GeneralSettingsPanel() {
             ) : null
           }
           control={
-            <div className="flex flex-wrap items-center justify-end gap-1.5">
-              {textGenProvider === "openaiCompatible" ? (
-                <>
-                  {openAICompatibleEndpoints.length > 0 ? (
-                    <Select
-                      value={selectedOpenAICompatibleEndpoint?.id ?? ""}
-                      onValueChange={(endpointId) => {
-                        const endpoint = openAICompatibleEndpoints.find(
-                          (candidate) => candidate.id === endpointId,
-                        );
-                        if (!endpoint) {
-                          return;
-                        }
-                        updateSettings({
-                          textGenerationModelSelection: {
-                            provider: "openaiCompatible",
-                            endpointId: endpoint.id,
-                            model: endpoint.model,
-                          },
-                        });
-                      }}
+            <div className="flex min-w-[18rem] max-w-full flex-col items-stretch gap-2">
+              <Select
+                value={getTextGenerationTargetValue(textGenerationModelSelection)}
+                onValueChange={(value) => {
+                  if (typeof value === "string") {
+                    handleTextGenerationTargetChange(value);
+                  }
+                }}
+              >
+                <SelectTrigger className="w-full" aria-label="Text generation target">
+                  <SelectValue>
+                    {textGenProvider === "openaiCompatible"
+                      ? (selectedOpenAICompatibleEndpoint?.label ?? "Custom endpoint")
+                      : PROVIDER_DISPLAY_NAMES[textGenProvider]}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem hideIndicator value="codex">
+                    Codex
+                  </SelectItem>
+                  <SelectItem hideIndicator value="claudeAgent">
+                    Claude
+                  </SelectItem>
+                  {enabledOpenAICompatibleEndpoints.length > 0 ? (
+                    <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground">
+                      Custom endpoints
+                    </div>
+                  ) : null}
+                  {enabledOpenAICompatibleEndpoints.map((endpoint) => (
+                    <SelectItem
+                      hideIndicator
+                      key={endpoint.id}
+                      value={`${CUSTOM_TEXT_ENDPOINT_PREFIX}${endpoint.id}`}
                     >
-                      <SelectTrigger
-                        className="w-full sm:w-56"
-                        aria-label="Custom text-generation endpoint"
-                      >
-                        <SelectValue>
-                          {selectedOpenAICompatibleEndpoint?.label ?? "Custom endpoint"}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectPopup align="end" alignItemWithTrigger={false}>
-                        {openAICompatibleEndpoints.map((endpoint) => (
-                          <SelectItem hideIndicator key={endpoint.id} value={endpoint.id}>
-                            {endpoint.label}
-                          </SelectItem>
-                        ))}
-                      </SelectPopup>
-                    </Select>
-                  ) : (
-                    <span className="text-sm text-muted-foreground">
-                      Add a custom endpoint to use OpenAI-compatible text generation.
-                    </span>
-                  )}
-                  <Input
-                    className="w-full sm:w-48"
-                    value={textGenModel}
-                    onChange={(event) => {
-                      updateSettings({
-                        textGenerationModelSelection: {
-                          provider: "openaiCompatible",
-                          endpointId: selectedOpenAICompatibleEndpoint?.id ?? "",
-                          model: event.currentTarget.value,
-                        },
-                      });
-                    }}
-                    placeholder="custom-model"
-                  />
-                </>
+                      {endpoint.label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+
+              {textGenProvider === "openaiCompatible" ? (
+                <div className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-left">
+                  <div className="text-xs font-medium text-foreground">
+                    {selectedOpenAICompatibleEndpoint?.label ?? "Custom endpoint"}
+                  </div>
+                  <div className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                    Uses <code className="font-mono text-foreground/85">{textGenModel}</code> via{" "}
+                    <code className="font-mono text-foreground/85">
+                      {selectedOpenAICompatibleEndpoint?.baseUrl ?? "custom base URL"}
+                    </code>
+                    . These endpoints are for generated Git and title text only, not interactive
+                    sessions.
+                  </div>
+                </div>
               ) : (
-                <>
+                <div className="flex flex-wrap items-center justify-end gap-1.5">
                   <ProviderModelPicker
                     provider={textGenProvider}
                     model={textGenModel}
@@ -1139,8 +1283,12 @@ export function GeneralSettingsPanel() {
                       });
                     }}
                   />
-                </>
+                </div>
               )}
+              <div className="text-right text-[11px] leading-relaxed text-muted-foreground">
+                Custom endpoints are used for generated text only. Interactive chat/session
+                providers stay separate.
+              </div>
             </div>
           }
         />
@@ -1485,6 +1633,167 @@ export function GeneralSettingsPanel() {
             </div>
           );
         })}
+
+        <div className="border-t border-border">
+          <div className="px-4 py-4 sm:px-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex min-h-5 items-center gap-1.5">
+                  <h3 className="text-sm font-medium text-foreground">
+                    Custom text-generation endpoints
+                  </h3>
+                  <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
+                    {areCustomTextEndpointsDirty ? (
+                      <SettingResetButton
+                        label="custom text-generation endpoints"
+                        onClick={() =>
+                          updateSettings({
+                            providers: {
+                              ...settings.providers,
+                              openaiCompatible: DEFAULT_UNIFIED_SETTINGS.providers.openaiCompatible,
+                            },
+                            textGenerationModelSelection:
+                              DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+                          })
+                        }
+                      />
+                    ) : null}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Add OpenAI-compatible endpoints for commit messages, PR text, branch names, and
+                  thread titles. These are not interactive session providers yet.
+                </p>
+              </div>
+              <Button size="sm" variant="outline" onClick={addOpenAICompatibleEndpoint}>
+                <PlusIcon className="size-3.5" />
+                Add endpoint
+              </Button>
+            </div>
+
+            {openAICompatibleEndpoints.length === 0 ? (
+              <div className="mt-4 rounded-xl border border-dashed border-border/70 bg-muted/15 px-4 py-3 text-sm text-muted-foreground">
+                No custom endpoints yet.
+              </div>
+            ) : (
+              <div className="mt-4 space-y-3">
+                {openAICompatibleEndpoints.map((endpoint) => (
+                  <div
+                    key={endpoint.id}
+                    className="rounded-xl border border-border/70 bg-muted/15 p-3 sm:p-4"
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0 flex-1">
+                        <Input
+                          value={endpoint.label}
+                          onChange={(event) =>
+                            updateOpenAICompatibleEndpoint(endpoint.id, {
+                              label: event.target.value || endpoint.label,
+                            })
+                          }
+                          placeholder="Endpoint label"
+                          aria-label={`Label for ${endpoint.label}`}
+                        />
+                      </div>
+                      <div className="flex items-center justify-end gap-2">
+                        <Switch
+                          checked={endpoint.enabled}
+                          onCheckedChange={(checked) =>
+                            updateOpenAICompatibleEndpoint(endpoint.id, {
+                              enabled: Boolean(checked),
+                            })
+                          }
+                          aria-label={`Enable ${endpoint.label}`}
+                        />
+                        <Button
+                          size="icon-xs"
+                          variant="ghost"
+                          className="size-7 rounded-md text-muted-foreground hover:text-foreground"
+                          onClick={() => removeOpenAICompatibleEndpoint(endpoint.id)}
+                          aria-label={`Remove ${endpoint.label}`}
+                        >
+                          <XIcon className="size-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <label className="block">
+                        <span className="text-xs font-medium text-foreground">Base URL</span>
+                        <Input
+                          className="mt-1.5"
+                          value={endpoint.baseUrl}
+                          onChange={(event) =>
+                            updateOpenAICompatibleEndpoint(endpoint.id, {
+                              baseUrl: event.target.value || endpoint.baseUrl,
+                            })
+                          }
+                          placeholder="https://api.openai.com/v1"
+                          spellCheck={false}
+                        />
+                      </label>
+
+                      <label className="block">
+                        <span className="text-xs font-medium text-foreground">Default model</span>
+                        <Input
+                          className="mt-1.5"
+                          value={endpoint.model}
+                          onChange={(event) =>
+                            updateOpenAICompatibleEndpoint(endpoint.id, {
+                              model: event.target.value || endpoint.model,
+                            })
+                          }
+                          placeholder="gpt-4.1-mini"
+                          spellCheck={false}
+                        />
+                      </label>
+
+                      <label className="block">
+                        <span className="text-xs font-medium text-foreground">API key</span>
+                        <Input
+                          className="mt-1.5"
+                          type="password"
+                          value={endpoint.apiKey}
+                          onChange={(event) =>
+                            updateOpenAICompatibleEndpoint(endpoint.id, {
+                              apiKey: event.target.value,
+                            })
+                          }
+                          placeholder="sk-..."
+                          spellCheck={false}
+                        />
+                      </label>
+
+                      <label className="block">
+                        <span className="text-xs font-medium text-foreground">API key env var</span>
+                        <Input
+                          className="mt-1.5"
+                          value={endpoint.apiKeyEnvVar}
+                          onChange={(event) =>
+                            updateOpenAICompatibleEndpoint(endpoint.id, {
+                              apiKeyEnvVar: event.target.value,
+                            })
+                          }
+                          placeholder="OPENAI_API_KEY"
+                          spellCheck={false}
+                        />
+                      </label>
+                    </div>
+
+                    <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+                      Uses the Chat Completions compatibility path. If this endpoint is selected
+                      above, Beppo uses it for generated Git and title text only.
+                    </p>
+                    <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                      Prefer <code>API key env var</code> for real credentials. Inline API keys are
+                      saved in Beppo&apos;s settings file on disk.
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </SettingsSection>
 
       <SettingsSection title="Advanced">
@@ -1588,7 +1897,7 @@ export function ArchivedThreadsPanel() {
       if (clicked === "unarchive") {
         try {
           await unarchiveThread(threadRef);
-        } catch (error) {
+        } catch (error: unknown) {
           toastManager.add({
             type: "error",
             title: "Failed to unarchive thread",
@@ -1656,7 +1965,7 @@ export function ArchivedThreadsPanel() {
                   className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
                   onClick={() =>
                     void unarchiveThread(scopeThreadRef(thread.environmentId, thread.id)).catch(
-                      (error) => {
+                      (error: unknown) => {
                         toastManager.add({
                           type: "error",
                           title: "Failed to unarchive thread",

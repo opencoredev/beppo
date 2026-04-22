@@ -13,6 +13,7 @@ import type {
   TurnId,
 } from "@t3tools/contracts";
 import {
+  PROVIDER_DISPLAY_NAMES,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
@@ -102,6 +103,7 @@ import type { PendingApproval, PendingUserInput } from "../../session-logic";
 import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
+import { deriveRateLimitEntriesFromPayload } from "../../lib/rateLimits";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 
@@ -573,6 +575,26 @@ export const ChatComposer = memo(
       () => providerStatuses.find((provider) => provider.provider === selectedProvider),
       [providerStatuses, selectedProvider],
     );
+    const compactControlsQuickCommands = useMemo(
+      () => [
+        {
+          command: "model" as const,
+          label: "Choose model",
+          description: "Insert /model to switch the model for this thread",
+        },
+        {
+          command: "plan" as const,
+          label: "Plan mode",
+          description: "Switch this thread into plan mode",
+        },
+        {
+          command: "default" as const,
+          label: "Build mode",
+          description: "Switch this thread back to normal build mode",
+        },
+      ],
+      [],
+    );
 
     const composerProviderState = useMemo(
       () =>
@@ -613,6 +635,23 @@ export const ChatComposer = memo(
         ? selectedModelForPicker
         : (normalizeModelSlug(selectedModelForPicker, selectedProvider) ?? selectedModelForPicker);
     }, [modelOptionsByProvider, selectedModelForPicker, selectedProvider]);
+    const compactControlsProviderSummary = useMemo(() => {
+      if (!selectedProviderStatus) {
+        return null;
+      }
+
+      const selectedModelDefinition = selectedProviderModels.find(
+        (model) => model.slug === selectedModelForPickerWithCustomFallback,
+      );
+      return {
+        provider: selectedProviderStatus.provider,
+        providerLabel:
+          PROVIDER_DISPLAY_NAMES[selectedProviderStatus.provider] ??
+          selectedProviderStatus.provider,
+        modelLabel: selectedModelDefinition?.name ?? selectedModelForPickerWithCustomFallback,
+        rateLimitEntries: deriveRateLimitEntriesFromPayload(selectedProviderStatus.rateLimits),
+      };
+    }, [selectedModelForPickerWithCustomFallback, selectedProviderModels, selectedProviderStatus]);
     const searchableModelOptions = useMemo(
       () =>
         AVAILABLE_PROVIDER_OPTIONS.filter(
@@ -1327,6 +1366,25 @@ export const ChatComposer = memo(
         terminalContextIds: composerTerminalContexts.map((context) => context.id),
       };
     }, [composerCursor, composerTerminalContexts, promptRef]);
+    const onSelectCompactQuickCommand = useCallback(
+      (command: "model" | "plan" | "default") => {
+        if (command === "model") {
+          const snapshot = readComposerSnapshot();
+          const applied = applyPromptReplacement(
+            snapshot.expandedCursor,
+            snapshot.expandedCursor,
+            "/model ",
+          );
+          if (applied) {
+            setComposerHighlightedItemId(null);
+          }
+          return;
+        }
+
+        void handleInteractionModeChange(command === "plan" ? "plan" : "default");
+      },
+      [applyPromptReplacement, handleInteractionModeChange, readComposerSnapshot],
+    );
 
     const resolveActiveComposerTrigger = useCallback((): {
       snapshot: { value: string; cursor: number; expandedCursor: number };
@@ -1932,8 +1990,12 @@ export const ChatComposer = memo(
                       interactionMode={interactionMode}
                       planSidebarLabel={planSidebarLabel}
                       planSidebarOpen={planSidebarOpen}
+                      providerSummary={compactControlsProviderSummary}
+                      quickCommands={compactControlsQuickCommands}
                       runtimeMode={runtimeMode}
                       traitsMenuContent={providerTraitsMenuContent}
+                      onSelectQuickCommand={onSelectCompactQuickCommand}
+                      onRunProjectScript={() => {}}
                       onToggleInteractionMode={toggleInteractionMode}
                       onTogglePlanSidebar={togglePlanSidebar}
                       onRuntimeModeChange={handleRuntimeModeChange}

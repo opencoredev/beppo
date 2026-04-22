@@ -4,7 +4,7 @@ import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
 import { OpenError, OpenInEditorInput } from "./editor";
 import { AuthAccessStreamEvent } from "./auth";
-import { FilesystemBrowseInput, FilesystemBrowseResult, FilesystemBrowseError } from "./filesystem";
+import { FilesystemBrowseError, FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem";
 import {
   GitActionProgressEvent,
   GitCheckoutInput,
@@ -33,11 +33,15 @@ import {
 import { KeybindingsConfigError } from "./keybindings";
 import {
   ClientOrchestrationCommand,
+  OrchestrationEvent,
   ORCHESTRATION_WS_METHODS,
   OrchestrationDispatchCommandError,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetSnapshotError,
+  OrchestrationGetSnapshotInput,
+  OrchestrationGetThreadSnapshotError,
+  OrchestrationGetThreadSnapshotInput,
   OrchestrationGetTurnDiffError,
   OrchestrationGetTurnDiffInput,
   OrchestrationReplayEventsError,
@@ -93,6 +97,7 @@ export const WS_METHODS = {
   // Git methods
   gitPull: "git.pull",
   gitRefreshStatus: "git.refreshStatus",
+  gitStatus: "git.status",
   gitRunStackedAction: "git.runStackedAction",
   gitListBranches: "git.listBranches",
   gitCreateWorktree: "git.createWorktree",
@@ -120,6 +125,7 @@ export const WS_METHODS = {
   serverTranscribeVoice: "server.transcribeVoice",
 
   // Streaming subscriptions
+  subscribeOrchestrationDomainEvents: "subscribeOrchestrationDomainEvents",
   subscribeGitStatus: "subscribeGitStatus",
   subscribeTerminalEvents: "subscribeTerminalEvents",
   subscribeServerConfig: "subscribeServerConfig",
@@ -185,11 +191,10 @@ export const WsFilesystemBrowseRpc = Rpc.make(WS_METHODS.filesystemBrowse, {
   error: FilesystemBrowseError,
 });
 
-export const WsSubscribeGitStatusRpc = Rpc.make(WS_METHODS.subscribeGitStatus, {
+export const WsGitStatusRpc = Rpc.make(WS_METHODS.gitStatus, {
   payload: GitStatusInput,
-  success: GitStatusStreamEvent,
+  success: GitStatusResult,
   error: GitManagerServiceError,
-  stream: true,
 });
 
 export const WsGitPullRpc = Rpc.make(WS_METHODS.gitPull, {
@@ -207,6 +212,13 @@ export const WsGitRefreshStatusRpc = Rpc.make(WS_METHODS.gitRefreshStatus, {
 export const WsGitRunStackedActionRpc = Rpc.make(WS_METHODS.gitRunStackedAction, {
   payload: GitRunStackedActionInput,
   success: GitActionProgressEvent,
+  error: GitManagerServiceError,
+  stream: true,
+});
+
+export const WsSubscribeGitStatusRpc = Rpc.make(WS_METHODS.subscribeGitStatus, {
+  payload: GitStatusInput,
+  success: GitStatusStreamEvent,
   error: GitManagerServiceError,
   stream: true,
 });
@@ -289,6 +301,21 @@ export const WsTerminalCloseRpc = Rpc.make(WS_METHODS.terminalClose, {
   error: TerminalError,
 });
 
+export const WsOrchestrationGetSnapshotRpc = Rpc.make(ORCHESTRATION_WS_METHODS.getSnapshot, {
+  payload: OrchestrationGetSnapshotInput,
+  success: OrchestrationRpcSchemas.getSnapshot.output,
+  error: OrchestrationGetSnapshotError,
+});
+
+export const WsOrchestrationGetThreadSnapshotRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getThreadSnapshot,
+  {
+    payload: OrchestrationGetThreadSnapshotInput,
+    success: OrchestrationRpcSchemas.getThreadSnapshot.output,
+    error: OrchestrationGetThreadSnapshotError,
+  },
+);
+
 export const WsOrchestrationDispatchCommandRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.dispatchCommand,
   {
@@ -336,6 +363,15 @@ export const WsOrchestrationSubscribeThreadRpc = Rpc.make(
   },
 );
 
+export const WsSubscribeOrchestrationDomainEventsRpc = Rpc.make(
+  WS_METHODS.subscribeOrchestrationDomainEvents,
+  {
+    payload: Schema.Struct({}),
+    success: OrchestrationEvent,
+    stream: true,
+  },
+);
+
 export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTerminalEvents, {
   payload: Schema.Struct({}),
   success: TerminalEvent,
@@ -373,8 +409,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsSubscribeGitStatusRpc,
-  WsGitPullRpc,
   WsGitRefreshStatusRpc,
+  WsGitStatusRpc,
+  WsGitPullRpc,
   WsGitRunStackedActionRpc,
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
@@ -390,10 +427,13 @@ export const WsRpcGroup = RpcGroup.make(
   WsTerminalClearRpc,
   WsTerminalRestartRpc,
   WsTerminalCloseRpc,
+  WsSubscribeOrchestrationDomainEventsRpc,
   WsSubscribeTerminalEventsRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,
+  WsOrchestrationGetSnapshotRpc,
+  WsOrchestrationGetThreadSnapshotRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,

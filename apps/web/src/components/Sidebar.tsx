@@ -4,6 +4,7 @@ import {
   ChevronRightIcon,
   CloudIcon,
   GitPullRequestIcon,
+  PinIcon,
   PlusIcon,
   SearchIcon,
   SettingsIcon,
@@ -76,7 +77,7 @@ import {
   threadTraversalDirectionFromCommand,
 } from "../keybindings";
 import { useGitStatus } from "../lib/gitStatusState";
-import { readLocalApi } from "../localApi";
+import { ensureLocalApi, readLocalApi } from "../localApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
@@ -141,13 +142,16 @@ import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { CommandDialogTrigger } from "./ui/command";
 import { readEnvironmentApi } from "../environmentApi";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
-import { useServerKeybindings } from "../rpc/serverState";
+import { useServerConfig, useServerKeybindings, useServerProviders } from "../rpc/serverState";
 import { deriveLogicalProjectKey } from "../logicalProject";
 import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
 import type { Project, SidebarThreadSummary } from "../types";
+import { SidebarProviderStatusList } from "./SidebarProviderStatusList";
+import { usePinnedThreadsStore } from "~/pinnedThreadsStore";
+import { ThreadPinToggleButton } from "./ThreadPinToggleButton";
 const THREAD_PREVIEW_LIMIT = 6;
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
@@ -363,6 +367,7 @@ interface SidebarThreadRowProps {
   cancelRename: () => void;
   attemptArchiveThread: (threadRef: ScopedThreadRef) => Promise<void>;
   openPrLink: (event: React.MouseEvent<HTMLElement>, prUrl: string) => void;
+  pinned?: boolean;
 }
 
 const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowProps) {
@@ -388,6 +393,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     cancelRename,
     attemptArchiveThread,
     openPrLink,
+    pinned = false,
     thread,
   } = props;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
@@ -676,6 +682,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             </span>
           )}
           <div className="flex min-w-12 justify-end">
+            <div
+              className={`pointer-events-none absolute top-1/2 right-7 -translate-y-1/2 transition-opacity duration-150 ${
+                pinned
+                  ? "pointer-events-auto opacity-100"
+                  : "group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100 opacity-0"
+              }`}
+            >
+              <ThreadPinToggleButton threadId={thread.id} label={thread.title} />
+            </div>
             {isConfirmingArchive ? (
               <button
                 ref={handleConfirmArchiveRef}
@@ -1954,6 +1969,95 @@ function SortableProjectItem({
   );
 }
 
+interface SidebarPinnedThreadsSectionProps {
+  pinnedThreads: readonly SidebarThreadSummary[];
+  routeThreadKey: string | null;
+  threadJumpLabelByKey: ReadonlyMap<string, string>;
+  attachThreadListAutoAnimateRef: (node: HTMLElement | null) => void;
+  appSettingsConfirmThreadArchive: boolean;
+  renamingThreadKey: string | null;
+  renamingTitle: string;
+  setRenamingTitle: (title: string) => void;
+  renamingInputRef: React.RefObject<HTMLInputElement | null>;
+  renamingCommittedRef: React.RefObject<boolean>;
+  confirmingArchiveThreadKey: string | null;
+  setConfirmingArchiveThreadKey: React.Dispatch<React.SetStateAction<string | null>>;
+  confirmArchiveButtonRefs: React.RefObject<Map<string, HTMLButtonElement>>;
+  handleThreadClick: (
+    event: React.MouseEvent,
+    threadRef: ScopedThreadRef,
+    orderedProjectThreadKeys: readonly string[],
+  ) => void;
+  navigateToThread: (threadRef: ScopedThreadRef) => void;
+  handleMultiSelectContextMenu: (position: { x: number; y: number }) => Promise<void>;
+  handleThreadContextMenu: (
+    threadRef: ScopedThreadRef,
+    position: { x: number; y: number },
+  ) => Promise<void>;
+  clearSelection: () => void;
+  commitRename: (
+    threadRef: ScopedThreadRef,
+    newTitle: string,
+    originalTitle: string,
+  ) => Promise<void>;
+  cancelRename: () => void;
+  attemptArchiveThread: (threadRef: ScopedThreadRef) => Promise<void>;
+  openPrLink: (event: React.MouseEvent<HTMLElement>, prUrl: string) => void;
+}
+
+const SidebarPinnedThreadsSection = memo(function SidebarPinnedThreadsSection(
+  props: SidebarPinnedThreadsSectionProps,
+) {
+  if (props.pinnedThreads.length === 0) {
+    return null;
+  }
+
+  return (
+    <SidebarGroup className="px-2 pt-2 pb-0">
+      <div className="mb-1 flex items-center gap-2 pl-2 pr-1.5">
+        <PinIcon className="size-3.5 text-primary" />
+        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+          Pinned
+        </span>
+      </div>
+      <SidebarMenu ref={props.attachThreadListAutoAnimateRef}>
+        {props.pinnedThreads.map((thread) => {
+          const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+          return (
+            <SidebarThreadRow
+              key={`pinned-${thread.environmentId}-${thread.id}`}
+              thread={thread}
+              projectCwd={null}
+              orderedProjectThreadKeys={[threadKey]}
+              isActive={props.routeThreadKey === threadKey}
+              jumpLabel={props.threadJumpLabelByKey.get(threadKey) ?? null}
+              appSettingsConfirmThreadArchive={props.appSettingsConfirmThreadArchive}
+              renamingThreadKey={props.renamingThreadKey}
+              renamingTitle={props.renamingTitle}
+              setRenamingTitle={props.setRenamingTitle}
+              renamingInputRef={props.renamingInputRef}
+              renamingCommittedRef={props.renamingCommittedRef}
+              confirmingArchiveThreadKey={props.confirmingArchiveThreadKey}
+              setConfirmingArchiveThreadKey={props.setConfirmingArchiveThreadKey}
+              confirmArchiveButtonRefs={props.confirmArchiveButtonRefs}
+              handleThreadClick={props.handleThreadClick}
+              navigateToThread={props.navigateToThread}
+              handleMultiSelectContextMenu={props.handleMultiSelectContextMenu}
+              handleThreadContextMenu={props.handleThreadContextMenu}
+              clearSelection={props.clearSelection}
+              commitRename={props.commitRename}
+              cancelRename={props.cancelRename}
+              attemptArchiveThread={props.attemptArchiveThread}
+              openPrLink={props.openPrLink}
+              pinned
+            />
+          );
+        })}
+      </SidebarMenu>
+    </SidebarGroup>
+  );
+});
+
 const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
 }: {
@@ -1998,13 +2102,44 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
 
 const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   const navigate = useNavigate();
+  const serverConfig = useServerConfig();
+  const serverProviders = useServerProviders();
+  const showSidebarUpdatePill = useSettings((settings) => settings.showSidebarUpdatePill);
+  const showSidebarProviders = useSettings((settings) => settings.showSidebarProviders);
+  const sidebarProviderVisibility = useSettings((settings) => settings.sidebarProviderVisibility);
+  const hasRequestedProviderRefreshRef = useRef(false);
   const handleSettingsClick = useCallback(() => {
     void navigate({ to: "/settings" });
   }, [navigate]);
+  const visibleSidebarProviders = useMemo(
+    () =>
+      serverProviders.filter((provider) => sidebarProviderVisibility[provider.provider] ?? true),
+    [serverProviders, sidebarProviderVisibility],
+  );
+
+  useEffect(() => {
+    if (serverProviders.length > 0 || hasRequestedProviderRefreshRef.current) {
+      return;
+    }
+
+    hasRequestedProviderRefreshRef.current = true;
+    void ensureLocalApi()
+      .server.refreshProviders()
+      .catch(() => {
+        hasRequestedProviderRefreshRef.current = false;
+      });
+  }, [serverProviders.length]);
 
   return (
     <SidebarFooter className="p-2">
-      <SidebarUpdatePill />
+      {showSidebarUpdatePill ? <SidebarUpdatePill /> : null}
+      {showSidebarProviders ? (
+        <SidebarProviderStatusList
+          providers={visibleSidebarProviders}
+          isLoading={serverConfig === null}
+          onOpenSettings={handleSettingsClick}
+        />
+      ) : null}
       <SidebarMenu>
         <SidebarMenuItem>
           <SidebarMenuButton
@@ -2095,7 +2230,6 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     attachProjectListAutoAnimateRef,
     projectsLength,
   } = props;
-
   const handleProjectSortOrderChange = useCallback(
     (sortOrder: SidebarProjectSortOrder) => {
       updateSettings({ sidebarProjectSortOrder: sortOrder });

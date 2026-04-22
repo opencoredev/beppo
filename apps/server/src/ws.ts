@@ -12,6 +12,7 @@ import {
   type OrchestrationShellStreamEvent,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
+  OrchestrationGetThreadSnapshotError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
   ProjectSearchEntriesError,
@@ -528,6 +529,14 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid);
 
       return WsRpcGroup.of({
+        [WS_METHODS.subscribeOrchestrationDomainEvents]: (_input) =>
+          observeRpcStreamEffect(
+            WS_METHODS.subscribeOrchestrationDomainEvents,
+            Effect.succeed(
+              orchestrationEngine.streamDomainEvents.pipe(Stream.mapEffect(enrichProjectEvent)),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,
@@ -553,6 +562,35 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                       message: "Failed to dispatch orchestration command",
                       cause,
                     }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.getSnapshot]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getSnapshot,
+            projectionSnapshotQuery.getSnapshot(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetSnapshotError({
+                    message: "Failed to load orchestration snapshot",
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.getThreadSnapshot]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getThreadSnapshot,
+            projectionSnapshotQuery.getThreadSnapshot(input.threadId).pipe(
+              Effect.map(Option.getOrNull),
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetThreadSnapshotError({
+                    message: "Failed to load thread snapshot",
+                    cause,
+                  }),
               ),
             ),
             { "rpc.aggregate": "orchestration" },
@@ -823,6 +861,10 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               "rpc.aggregate": "git",
             },
           ),
+        [WS_METHODS.gitStatus]: (input) =>
+          observeRpcEffect(WS_METHODS.gitStatus, gitStatusBroadcaster.getStatus(input), {
+            "rpc.aggregate": "git",
+          }),
         [WS_METHODS.gitRefreshStatus]: (input) =>
           observeRpcEffect(
             WS_METHODS.gitRefreshStatus,

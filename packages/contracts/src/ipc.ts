@@ -282,21 +282,72 @@ export interface EnvironmentApi {
   };
 }
 
-export interface NativeApi extends LocalApi, EnvironmentApi {
+export interface NativeApi {
+  dialogs: {
+    pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
+    confirm: (message: string) => Promise<boolean>;
+  };
+  terminal: {
+    open: (input: typeof TerminalOpenInput.Encoded) => Promise<TerminalSessionSnapshot>;
+    write: (input: typeof TerminalWriteInput.Encoded) => Promise<void>;
+    resize: (input: typeof TerminalResizeInput.Encoded) => Promise<void>;
+    clear: (input: typeof TerminalClearInput.Encoded) => Promise<void>;
+    restart: (input: typeof TerminalRestartInput.Encoded) => Promise<TerminalSessionSnapshot>;
+    close: (input: typeof TerminalCloseInput.Encoded) => Promise<void>;
+    onEvent: (callback: (event: TerminalEvent) => void) => () => void;
+  };
+  projects: {
+    searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
+    writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
+  };
+  filesystem: {
+    browse: (input: FilesystemBrowseInput) => Promise<FilesystemBrowseResult>;
+  };
+  shell: {
+    openInEditor: (cwd: string, editor: EditorId) => Promise<void>;
+    openExternal: (url: string) => Promise<void>;
+  };
+  git: {
+    pull: (input: GitPullInput) => Promise<GitPullResult>;
+    status: (input: GitStatusInput) => Promise<GitStatusResult>;
+    listBranches: (input: GitListBranchesInput) => Promise<GitListBranchesResult>;
+    createWorktree: (input: GitCreateWorktreeInput) => Promise<GitCreateWorktreeResult>;
+    removeWorktree: (input: GitRemoveWorktreeInput) => Promise<void>;
+    createBranch: (input: GitCreateBranchInput) => Promise<GitCreateBranchResult>;
+    checkout: (input: GitCheckoutInput) => Promise<GitCheckoutResult>;
+    init: (input: GitInitInput) => Promise<void>;
+    resolvePullRequest: (input: GitPullRequestRefInput) => Promise<GitResolvePullRequestResult>;
+    preparePullRequestThread: (
+      input: GitPreparePullRequestThreadInput,
+    ) => Promise<GitPreparePullRequestThreadResult>;
+  };
+  contextMenu: {
+    show: <T extends string>(
+      items: readonly ContextMenuItem<T>[],
+      position?: { x: number; y: number },
+    ) => Promise<T | null>;
+  };
   microphone: {
     openSystemSettings: () => Promise<boolean>;
   };
-  server: LocalApi["server"] & {
+  server: {
+    getConfig: () => Promise<ServerConfig>;
+    refreshProviders: () => Promise<ServerProviderUpdatedPayload>;
+    upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
+    getSettings: () => Promise<ServerSettings>;
+    updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
     transcribeVoice: (
       input: ServerVoiceTranscriptionInput,
     ) => Promise<ServerVoiceTranscriptionResult>;
   };
-  git: EnvironmentApi["git"] & {
-    status: (input: GitStatusInput) => Promise<GitStatusResult>;
-  };
-  orchestration: EnvironmentApi["orchestration"] & {
+  orchestration: {
     getSnapshot: (input?: OrchestrationGetSnapshotInput) => Promise<OrchestrationReadModel>;
     getThreadSnapshot: (threadId: ThreadId) => Promise<OrchestrationThread | null>;
+    dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
+    getTurnDiff: (input: OrchestrationGetTurnDiffInput) => Promise<OrchestrationGetTurnDiffResult>;
+    getFullThreadDiff: (
+      input: OrchestrationGetFullThreadDiffInput,
+    ) => Promise<OrchestrationGetFullThreadDiffResult>;
     replayEvents: (fromSequenceExclusive: number) => Promise<readonly OrchestrationEvent[]>;
     onDomainEvent: (callback: (event: OrchestrationEvent) => void) => () => void;
   };

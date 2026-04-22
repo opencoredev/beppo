@@ -1,4 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { APP_HIDDEN_DIR } from "@t3tools/shared/branding";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { assert, describe, it } from "@effect/vitest";
@@ -46,7 +47,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
   });
 
   describe("createDevRunnerEnv", () => {
-    it.effect("defaults T3CODE_HOME to ~/.beppo when not provided", () =>
+    it.effect("defaults T3CODE_HOME to the Beppo home directory when not provided", () =>
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
           mode: "dev",
@@ -63,7 +64,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.T3CODE_HOME, resolve(homedir(), ".beppo"));
+        assert.equal(env.T3CODE_HOME, resolve(homedir(), APP_HIDDEN_DIR));
       }),
     );
 

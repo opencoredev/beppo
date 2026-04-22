@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "bunx --bun vite",
+    "build": "bunx --bun vite build",
     "prepare": "node ../../scripts/effect-prepare.mjs",
-    "preview": "vite preview",
+    "preview": "bunx --bun vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:browser": "vitest run --config vitest.browser.config.ts",

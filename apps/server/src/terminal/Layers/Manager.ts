@@ -815,7 +815,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       threadId: string,
       terminalId: string,
     ) {
-      const termSignalSent = yield* Effect.try({
+      yield* Effect.try({
         try: () => process.kill("SIGTERM"),
         catch: (cause) =>
           new TerminalProcessSignalError({
@@ -824,20 +824,15 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             signal: "SIGTERM",
           }),
       }).pipe(
-        Effect.as(true),
         Effect.catch((error) =>
-          Effect.logWarning("failed to kill terminal process", {
+          Effect.logWarning("failed to send SIGTERM to terminal process", {
             threadId,
             terminalId,
             signal: "SIGTERM",
             error: error.message,
-          }).pipe(Effect.as(false)),
+          }),
         ),
       );
-      if (!termSignalSent) {
-        return;
-      }
-
       yield* Effect.sleep(processKillGraceMs);
 
       yield* Effect.try({

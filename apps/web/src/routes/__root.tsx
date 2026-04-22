@@ -202,6 +202,7 @@ function EnvironmentConnectionManagerBootstrap() {
 
 function EventRouter() {
   const setActiveEnvironmentId = useStore((store) => store.setActiveEnvironmentId);
+  const setProjectExpanded = useUiStateStore((store) => store.setProjectExpanded);
   const navigate = useNavigate();
   const pathname = useLocation({ select: (loc) => loc.pathname });
   const readPathname = useEffectEvent(() => pathname);
@@ -213,10 +214,7 @@ function EventRouter() {
   const handleWelcome = useEffectEvent((payload: ServerLifecycleWelcomePayload | null) => {
     if (!payload) return;
 
-    const environment = serverConfig?.environment;
-    if (!environment) {
-      return;
-    }
+    const { environment } = payload;
 
     updatePrimaryEnvironmentDescriptor(environment);
     setActiveEnvironmentId(environment.environmentId);
@@ -229,12 +227,10 @@ function EventRouter() {
       if (!payload.bootstrapProjectId || !payload.bootstrapThreadId) {
         return;
       }
-      useUiStateStore
-        .getState()
-        .setProjectExpanded(
-          scopedProjectKey(scopeProjectRef(environment.environmentId, payload.bootstrapProjectId)),
-          true,
-        );
+      setProjectExpanded(
+        scopedProjectKey(scopeProjectRef(environment.environmentId, payload.bootstrapProjectId)),
+        true,
+      );
 
       if (readPathname() !== "/") {
         return;

@@ -81,7 +81,6 @@ export const ServerProviderSkill = Schema.Struct({
   shortDescription: Schema.optional(TrimmedNonEmptyString),
 });
 export type ServerProviderSkill = typeof ServerProviderSkill.Type;
-
 export const ServerProviderSupportLevel = Schema.Literals([
   "stable",
   "experimental",

@@ -103,7 +103,7 @@ jobs:
             echo "release_channel=stable" >> "$GITHUB_OUTPUT"
             echo "version=$version" >> "$GITHUB_OUTPUT"
             echo "tag=v$version" >> "$GITHUB_OUTPUT"
-            echo "name=T3 Code v$version" >> "$GITHUB_OUTPUT"
+            echo "name=Beppo v$version" >> "$GITHUB_OUTPUT"
             echo "cli_dist_tag=latest" >> "$GITHUB_OUTPUT"
             if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
@@ -483,6 +483,9 @@ jobs:
           > ```bash
           > xattr -dr com.apple.quarantine /Applications/Beppo.app
           > ```
+          >
+          > Windows may show a SmartScreen warning for an unknown publisher.
+          > Linux builds may require `chmod +x path/to/Beppo` after extraction.
           EOF
 
       - name: Publish release

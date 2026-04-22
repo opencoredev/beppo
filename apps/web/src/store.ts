@@ -85,7 +85,7 @@ export interface EnvironmentState {
   // truth for sidebar data.
   // ---------------------------------------------------------------------------
   sidebarThreadSummaryById: Record<ThreadId, SidebarThreadSummary>;
-
+  hydratedThreadIds: Record<ThreadId, true>;
   bootstrapComplete: boolean;
 }
 
@@ -111,6 +111,7 @@ const initialEnvironmentState: EnvironmentState = {
   turnDiffIdsByThreadId: {},
   turnDiffSummaryByThreadId: {},
   sidebarThreadSummaryById: {},
+  hydratedThreadIds: {},
   bootstrapComplete: false,
 };
 
@@ -334,6 +335,33 @@ function toThreadTurnState(thread: Thread): ThreadTurnState {
     ...(thread.pendingSourceProposedPlan
       ? { pendingSourceProposedPlan: thread.pendingSourceProposedPlan }
       : {}),
+  };
+}
+
+function buildSidebarThreadSummary(
+  thread: Thread,
+  previousSummary?: SidebarThreadSummary,
+): SidebarThreadSummary {
+  return {
+    id: thread.id,
+    environmentId: thread.environmentId,
+    projectId: thread.projectId,
+    title: thread.title,
+    interactionMode: thread.interactionMode,
+    session: thread.session,
+    createdAt: thread.createdAt,
+    archivedAt: thread.archivedAt,
+    updatedAt: thread.updatedAt,
+    latestTurn: thread.latestTurn,
+    branch: thread.branch,
+    worktreePath: thread.worktreePath,
+    latestUserMessageAt:
+      [...thread.messages].reverse().find((message) => message.role === "user")?.createdAt ??
+      previousSummary?.latestUserMessageAt ??
+      null,
+    hasPendingApprovals: previousSummary?.hasPendingApprovals ?? false,
+    hasPendingUserInput: previousSummary?.hasPendingUserInput ?? false,
+    hasActionableProposedPlan: previousSummary?.hasActionableProposedPlan ?? false,
   };
 }
 
@@ -824,6 +852,30 @@ function removeThreadState(state: EnvironmentState, threadId: ThreadId): Environ
   };
 }
 
+function mergeSummaryThread(existing: Thread | undefined, summaryThread: Thread): Thread {
+  if (!existing) {
+    return summaryThread;
+  }
+
+  return {
+    ...existing,
+    projectId: summaryThread.projectId,
+    title: summaryThread.title,
+    modelSelection: summaryThread.modelSelection,
+    runtimeMode: summaryThread.runtimeMode,
+    interactionMode: summaryThread.interactionMode,
+    session: summaryThread.session,
+    error: summaryThread.error,
+    createdAt: summaryThread.createdAt,
+    archivedAt: summaryThread.archivedAt,
+    updatedAt: summaryThread.updatedAt,
+    latestTurn: summaryThread.latestTurn,
+    pendingSourceProposedPlan: summaryThread.pendingSourceProposedPlan,
+    branch: summaryThread.branch,
+    worktreePath: summaryThread.worktreePath,
+  };
+}
+
 function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error") {
   if (status === "error") {
     return "error" as const;
@@ -1102,6 +1154,7 @@ function syncEnvironmentShellSnapshot(
       state.turnDiffSummaryByThreadId,
       nextThreadIds,
     ),
+    hydratedThreadIds: retainThreadScopedRecord(state.hydratedThreadIds, nextThreadIds),
     bootstrapComplete: true,
   };
 
@@ -1115,15 +1168,19 @@ function syncEnvironmentShellSnapshot(
 export function syncServerShellSnapshot(
   state: AppState,
   snapshot: OrchestrationShellSnapshot,
-  environmentId: EnvironmentId,
+  environmentId?: EnvironmentId,
 ): AppState {
+  const resolvedEnvironmentId = environmentId ?? state.activeEnvironmentId;
+  if (!resolvedEnvironmentId) {
+    return state;
+  }
   return commitEnvironmentState(
     state,
-    environmentId,
+    resolvedEnvironmentId,
     syncEnvironmentShellSnapshot(
-      getStoredEnvironmentState(state, environmentId),
+      getStoredEnvironmentState(state, resolvedEnvironmentId),
       snapshot,
-      environmentId,
+      resolvedEnvironmentId,
     ),
   );
 }
@@ -1131,15 +1188,138 @@ export function syncServerShellSnapshot(
 export function syncServerThreadDetail(
   state: AppState,
   thread: OrchestrationThread,
-  environmentId: EnvironmentId,
+  environmentId?: EnvironmentId,
 ): AppState {
-  const environmentState = getStoredEnvironmentState(state, environmentId);
+  const resolvedEnvironmentId = environmentId ?? state.activeEnvironmentId;
+  if (!resolvedEnvironmentId) {
+    return state;
+  }
+  const environmentState = getStoredEnvironmentState(state, resolvedEnvironmentId);
   const previousThread = getThreadFromEnvironmentState(environmentState, thread.id);
+  return commitEnvironmentState(state, resolvedEnvironmentId, {
+    ...writeThreadState(environmentState, mapThread(thread, resolvedEnvironmentId), previousThread),
+    hydratedThreadIds: {
+      ...environmentState.hydratedThreadIds,
+      [thread.id]: true,
+    },
+  });
+}
+
+function syncEnvironmentReadModelSummary(
+  state: EnvironmentState,
+  readModel: OrchestrationReadModel,
+  environmentId: EnvironmentId,
+): EnvironmentState {
+  const nextProjects = readModel.projects
+    .filter((project) => project.deletedAt === null)
+    .map((project) => mapProject(project, environmentId));
+  const nextThreadIds = new Set(
+    readModel.threads.filter((thread) => thread.deletedAt === null).map((thread) => thread.id),
+  );
+
+  let nextState: EnvironmentState = {
+    ...state,
+    ...buildProjectState(nextProjects),
+    threadIds: [],
+    threadIdsByProjectId: {},
+    threadShellById: retainThreadScopedRecord(state.threadShellById, nextThreadIds),
+    threadSessionById: retainThreadScopedRecord(state.threadSessionById, nextThreadIds),
+    threadTurnStateById: retainThreadScopedRecord(state.threadTurnStateById, nextThreadIds),
+    messageIdsByThreadId: retainThreadScopedRecord(state.messageIdsByThreadId, nextThreadIds),
+    messageByThreadId: retainThreadScopedRecord(state.messageByThreadId, nextThreadIds),
+    activityIdsByThreadId: retainThreadScopedRecord(state.activityIdsByThreadId, nextThreadIds),
+    activityByThreadId: retainThreadScopedRecord(state.activityByThreadId, nextThreadIds),
+    proposedPlanIdsByThreadId: retainThreadScopedRecord(
+      state.proposedPlanIdsByThreadId,
+      nextThreadIds,
+    ),
+    proposedPlanByThreadId: retainThreadScopedRecord(state.proposedPlanByThreadId, nextThreadIds),
+    turnDiffIdsByThreadId: retainThreadScopedRecord(state.turnDiffIdsByThreadId, nextThreadIds),
+    turnDiffSummaryByThreadId: retainThreadScopedRecord(
+      state.turnDiffSummaryByThreadId,
+      nextThreadIds,
+    ),
+    sidebarThreadSummaryById: retainThreadScopedRecord(
+      state.sidebarThreadSummaryById,
+      nextThreadIds,
+    ),
+    hydratedThreadIds: retainThreadScopedRecord(state.hydratedThreadIds, nextThreadIds),
+    bootstrapComplete: true,
+  };
+
+  for (const thread of readModel.threads) {
+    if (thread.deletedAt !== null) {
+      continue;
+    }
+
+    const mappedThread = mapThread(thread, environmentId);
+    const existingThread = getThreadFromEnvironmentState(state, mappedThread.id);
+    const nextThread =
+      state.hydratedThreadIds[mappedThread.id] && existingThread
+        ? mergeSummaryThread(existingThread, mappedThread)
+        : mappedThread;
+
+    nextState = writeThreadState(nextState, nextThread, existingThread);
+
+    const previousSummary = nextState.sidebarThreadSummaryById[nextThread.id];
+    const nextSummary = buildSidebarThreadSummary(nextThread, previousSummary);
+    if (!sidebarThreadSummariesEqual(previousSummary, nextSummary)) {
+      nextState = {
+        ...nextState,
+        sidebarThreadSummaryById: {
+          ...nextState.sidebarThreadSummaryById,
+          [nextThread.id]: nextSummary,
+        },
+      };
+    }
+  }
+
+  return nextState;
+}
+
+export function syncServerReadModelSummary(
+  state: AppState,
+  readModel: OrchestrationReadModel,
+): AppState {
+  const environmentId = state.activeEnvironmentId;
+  if (!environmentId) {
+    return state;
+  }
+
   return commitEnvironmentState(
     state,
     environmentId,
-    writeThreadState(environmentState, mapThread(thread, environmentId), previousThread),
+    syncEnvironmentReadModelSummary(
+      getStoredEnvironmentState(state, environmentId),
+      readModel,
+      environmentId,
+    ),
   );
+}
+
+export function syncServerReadModel(state: AppState, readModel: OrchestrationReadModel): AppState {
+  return syncServerReadModelSummary(state, readModel);
+}
+
+export function hydrateThreadSnapshot(
+  state: AppState,
+  threadSnapshot: OrchestrationReadModel["threads"][number],
+): AppState {
+  const environmentId = state.activeEnvironmentId;
+  if (!environmentId) {
+    return state;
+  }
+
+  const environmentState = getStoredEnvironmentState(state, environmentId);
+  const nextThread = mapThread(threadSnapshot, environmentId);
+  const previousThread = getThreadFromEnvironmentState(environmentState, nextThread.id);
+  return commitEnvironmentState(state, environmentId, {
+    ...writeThreadState(environmentState, nextThread, previousThread),
+    hydratedThreadIds: {
+      ...environmentState.hydratedThreadIds,
+      [nextThread.id]: true,
+    },
+  });
 }
 
 function applyEnvironmentOrchestrationEvent(
@@ -1699,17 +1879,22 @@ function applyEnvironmentShellEvent(
 export function applyOrchestrationEvents(
   state: AppState,
   events: ReadonlyArray<OrchestrationEvent>,
-  environmentId: EnvironmentId,
+  environmentId?: EnvironmentId,
 ): AppState {
   if (events.length === 0) {
     return state;
   }
-  const currentEnvironmentState = getStoredEnvironmentState(state, environmentId);
+  const resolvedEnvironmentId = environmentId ?? state.activeEnvironmentId;
+  if (!resolvedEnvironmentId) {
+    return state;
+  }
+  const currentEnvironmentState = getStoredEnvironmentState(state, resolvedEnvironmentId);
   const nextEnvironmentState = events.reduce(
-    (nextState, event) => applyEnvironmentOrchestrationEvent(nextState, event, environmentId),
+    (nextState, event) =>
+      applyEnvironmentOrchestrationEvent(nextState, event, resolvedEnvironmentId),
     currentEnvironmentState,
   );
-  return commitEnvironmentState(state, environmentId, nextEnvironmentState);
+  return commitEnvironmentState(state, resolvedEnvironmentId, nextEnvironmentState);
 }
 
 function getEnvironmentEntries(
@@ -1866,15 +2051,19 @@ export function setError(state: AppState, threadId: ThreadId, error: string | nu
 export function applyOrchestrationEvent(
   state: AppState,
   event: OrchestrationEvent,
-  environmentId: EnvironmentId,
+  environmentId?: EnvironmentId,
 ): AppState {
+  const resolvedEnvironmentId = environmentId ?? state.activeEnvironmentId;
+  if (!resolvedEnvironmentId) {
+    return state;
+  }
   return commitEnvironmentState(
     state,
-    environmentId,
+    resolvedEnvironmentId,
     applyEnvironmentOrchestrationEvent(
-      getStoredEnvironmentState(state, environmentId),
+      getStoredEnvironmentState(state, resolvedEnvironmentId),
       event,
-      environmentId,
+      resolvedEnvironmentId,
     ),
   );
 }
@@ -1882,15 +2071,19 @@ export function applyOrchestrationEvent(
 export function applyShellEvent(
   state: AppState,
   event: OrchestrationShellStreamEvent,
-  environmentId: EnvironmentId,
+  environmentId?: EnvironmentId,
 ): AppState {
+  const resolvedEnvironmentId = environmentId ?? state.activeEnvironmentId;
+  if (!resolvedEnvironmentId) {
+    return state;
+  }
   return commitEnvironmentState(
     state,
-    environmentId,
+    resolvedEnvironmentId,
     applyEnvironmentShellEvent(
-      getStoredEnvironmentState(state, environmentId),
+      getStoredEnvironmentState(state, resolvedEnvironmentId),
       event,
-      environmentId,
+      resolvedEnvironmentId,
     ),
   );
 }
@@ -1933,15 +2126,20 @@ interface AppStore extends AppState {
   setActiveEnvironmentId: (environmentId: EnvironmentId) => void;
   syncServerShellSnapshot: (
     snapshot: OrchestrationShellSnapshot,
-    environmentId: EnvironmentId,
+    environmentId?: EnvironmentId,
   ) => void;
-  syncServerThreadDetail: (thread: OrchestrationThread, environmentId: EnvironmentId) => void;
-  applyOrchestrationEvent: (event: OrchestrationEvent, environmentId: EnvironmentId) => void;
+  syncServerThreadDetail: (thread: OrchestrationThread, environmentId?: EnvironmentId) => void;
+  syncServerReadModel: (readModel: OrchestrationReadModel) => void;
+  syncServerReadModelSummary: (readModel: OrchestrationReadModel) => void;
+  hydrateThreadSnapshot: (thread: OrchestrationReadModel["threads"][number]) => void;
+  applyOrchestrationEvent: (event: OrchestrationEvent, environmentId?: EnvironmentId) => void;
   applyOrchestrationEvents: (
     events: ReadonlyArray<OrchestrationEvent>,
-    environmentId: EnvironmentId,
+    environmentId?: EnvironmentId,
   ) => void;
-  applyShellEvent: (event: OrchestrationShellStreamEvent, environmentId: EnvironmentId) => void;
+  /** Alias for `bootstrapComplete` used by route components. */
+  threadsHydrated: boolean;
+  applyShellEvent: (event: OrchestrationShellStreamEvent, environmentId?: EnvironmentId) => void;
   setError: (threadId: ThreadId, error: string | null) => void;
   setThreadBranch: (
     threadRef: ScopedThreadRef,
@@ -1950,14 +2148,21 @@ interface AppStore extends AppState {
   ) => void;
 }
 
-export const useStore = create<AppStore>((set) => ({
+export const useStore = create<AppStore>((set, get) => ({
   ...initialState,
+  get threadsHydrated() {
+    return selectBootstrapCompleteForActiveEnvironment(get());
+  },
   setActiveEnvironmentId: (environmentId) =>
     set((state) => setActiveEnvironmentId(state, environmentId)),
   syncServerShellSnapshot: (snapshot, environmentId) =>
     set((state) => syncServerShellSnapshot(state, snapshot, environmentId)),
   syncServerThreadDetail: (thread, environmentId) =>
     set((state) => syncServerThreadDetail(state, thread, environmentId)),
+  syncServerReadModel: (readModel) => set((state) => syncServerReadModel(state, readModel)),
+  syncServerReadModelSummary: (readModel) =>
+    set((state) => syncServerReadModelSummary(state, readModel)),
+  hydrateThreadSnapshot: (thread) => set((state) => hydrateThreadSnapshot(state, thread)),
   applyOrchestrationEvent: (event, environmentId) =>
     set((state) => applyOrchestrationEvent(state, event, environmentId)),
   applyOrchestrationEvents: (events, environmentId) =>

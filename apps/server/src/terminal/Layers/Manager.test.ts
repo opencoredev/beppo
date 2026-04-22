@@ -896,7 +896,7 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
     }),
   );
 
-  it.effect("injects runtime env overrides into spawned terminals", () =>
+  it.effect("filters blocked runtime env overrides while keeping custom flags", () =>
     Effect.gen(function* () {
       const { manager, ptyAdapter } = yield* createManager();
       yield* manager.open(
@@ -912,8 +912,8 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
       expect(spawnInput).toBeDefined();
       if (!spawnInput) return;
 
-      assert.equal(spawnInput.env.T3CODE_PROJECT_ROOT, "/repo");
-      assert.equal(spawnInput.env.T3CODE_WORKTREE_PATH, "/repo/worktree-a");
+      assert.equal(spawnInput.env.T3CODE_PROJECT_ROOT, undefined);
+      assert.equal(spawnInput.env.T3CODE_WORKTREE_PATH, undefined);
       assert.equal(spawnInput.env.CUSTOM_FLAG, "1");
     }),
   );

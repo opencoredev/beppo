@@ -17,6 +17,7 @@ import {
 
 import {
   buildServerProvider,
+  buildPendingServerProvider,
   DEFAULT_TIMEOUT_MS,
   detailFromResult,
   extractAuthBoolean,
@@ -672,34 +673,13 @@ const makePendingClaudeProvider = (claudeSettings: ClaudeSettings): ServerProvid
     DEFAULT_CLAUDE_MODEL_CAPABILITIES,
   );
 
-  if (!claudeSettings.enabled) {
-    return buildServerProvider({
-      provider: PROVIDER,
-      enabled: false,
-      checkedAt,
-      models,
-      probe: {
-        installed: false,
-        version: null,
-        status: "warning",
-        auth: { status: "unknown" },
-        message: "Claude is disabled in Beppo settings.",
-      },
-    });
-  }
-
-  return buildServerProvider({
+  return buildPendingServerProvider({
     provider: PROVIDER,
-    enabled: true,
+    enabled: claudeSettings.enabled,
     checkedAt,
     models,
-    probe: {
-      installed: false,
-      version: null,
-      status: "warning",
-      auth: { status: "unknown" },
-      message: "Claude provider status has not been checked in this session yet.",
-    },
+    disabledMessage: "Claude is disabled in Beppo settings.",
+    checkingMessage: "Checking Claude status…",
   });
 };
 
@@ -738,7 +718,7 @@ export const ClaudeProviderLive = Layer.effect(
         Stream.map((settings) => settings.providers.claudeAgent),
       ),
       haveSettingsChanged: (previous, next) => !Equal.equals(previous, next),
-      initialSnapshot: makePendingClaudeProvider,
+      buildInitialSnapshot: makePendingClaudeProvider,
       checkProvider,
     });
   }),
